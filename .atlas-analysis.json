@@ -1,0 +1,126 @@
+{
+  "projectType": "ai-ml",
+  "projectName": "ML Experiment Autopilot",
+  "projectDescription": "An autonomous agent that designs, executes, and iterates on Machine Learning experiments using Gemini 3 with Thought Signatures for reasoning continuity.",
+  "theme": "aspen",
+  "primaryColor": "#4285F4",
+  "lightColor": "#669DF6",
+  "darkColor": "#1967D2",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/architecture",
+              "concepts/thought-signatures",
+              "concepts/experiment-loop",
+              "concepts/gemini-integration"
+            ]
+          },
+          {
+            "group": "CLI Reference",
+            "pages": [
+              "cli/overview",
+              "cli/run-command",
+              "cli/arguments",
+              "cli/constraints"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/running-experiments",
+              "guides/understanding-results",
+              "guides/mlflow-tracking",
+              "guides/custom-constraints",
+              "guides/resuming-experiments",
+              "guides/troubleshooting"
+            ]
+          },
+          {
+            "group": "Examples",
+            "pages": [
+              "examples/regression",
+              "examples/classification",
+              "examples/advanced-constraints"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Cognitive Components",
+            "pages": [
+              "api/gemini-client",
+              "api/experiment-designer",
+              "api/results-analyzer",
+              "api/hypothesis-generator",
+              "api/report-generator"
+            ]
+          },
+          {
+            "group": "Execution Layer",
+            "pages": [
+              "api/data-profiler",
+              "api/code-generator",
+              "api/experiment-runner",
+              "api/visualization-generator"
+            ]
+          },
+          {
+            "group": "Orchestration",
+            "pages": [
+              "api/controller",
+              "api/state-management"
+            ]
+          },
+          {
+            "group": "Persistence",
+            "pages": [
+              "api/mlflow-tracker"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Autonomous ML experimentation using Gemini 3 Flash",
+    "Thought Signatures for reasoning continuity across API calls",
+    "Hypothesis-driven experiment design with confidence scoring",
+    "Automatic code generation using Jinja2 templates",
+    "MLflow integration for experiment tracking and artifacts",
+    "Natural language constraints for experiment guidance",
+    "Publication-ready narrative reports with insights",
+    "Support for regression and classification tasks",
+    "Rich CLI with colored console output",
+    "Resume capability for interrupted experiments"
+  ],
+  "publicApiSurface": [
+    "python -m src.main run",
+    "ExperimentController",
+    "GeminiClient",
+    "ExperimentDesigner",
+    "ResultsAnalyzer",
+    "HypothesisGenerator",
+    "ReportGenerator",
+    "DataProfiler",
+    "CodeGenerator",
+    "ExperimentRunner",
+    "VisualizationGenerator",
+    "MLflowTracker"
+  ]
+}
