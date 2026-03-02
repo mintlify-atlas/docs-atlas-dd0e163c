@@ -1,0 +1,181 @@
+---
+title: ML Experiment Autopilot
+description: Autonomous ML experimentation powered by Google Gemini 3 — designs, executes, and iterates on machine learning experiments without human supervision, explaining every decision along the way.
+---
+
+<img
+  className="block dark:hidden"
+  src="/images/hero-light.svg"
+  alt="ML Experiment Autopilot Hero Light"
+/>
+<img
+  className="hidden dark:block"
+  src="/images/hero-dark.svg"
+  alt="ML Experiment Autopilot Hero Dark"
+/>
+
+## Beyond Black-Box AutoML
+
+ML Experiment Autopilot reimagines automated machine learning by combining autonomous experimentation with explainable AI. Unlike traditional AutoML tools that operate as black boxes, our system uses Google Gemini 3 to explain every decision, test data-driven hypotheses, and generate publication-ready reports.
+
+<CardGroup cols={2}>
+  <Card
+    title="Explainable Decisions"
+    icon="brain"
+    href="/quickstart#see-gemini-reasoning"
+  >
+    Every experiment design, model selection, and hyperparameter choice comes with Gemini's detailed reasoning
+  </Card>
+  <Card
+    title="Hypothesis Testing"
+    icon="flask"
+    href="/quickstart#experiment-loop"
+  >
+    Generates and tests data-driven hypotheses across iterations, learning from successes and failures
+  </Card>
+  <Card
+    title="Natural Language Constraints"
+    icon="message"
+    href="/guides/custom-constraints"
+  >
+    Guide experiments using plain English preferences instead of complex configuration files
+  </Card>
+  <Card
+    title="Publication-Ready Reports"
+    icon="file-lines"
+    href="/guides/understanding-results"
+  >
+    Automatically generates narrative Markdown reports with methodology, insights, and recommendations
+  </Card>
+</CardGroup>
+
+## How It Works
+
+The autopilot runs an autonomous experiment loop powered by Gemini 3's Marathon Agent capabilities:
+
+<Steps>
+  <Step title="Data Profiling">
+    Analyzes your dataset's schema, distributions, missing values, and statistical properties
+  </Step>
+  <Step title="Baseline Model">
+    Establishes a performance floor with a simple model
+  </Step>
+  <Step title="Iterative Experimentation">
+    Gemini designs experiments, generates Python code, executes training, analyzes results, and proposes next steps — all autonomously
+  </Step>
+  <Step title="Intelligent Termination">
+    Stops when performance plateaus, time budget expires, or target metrics are achieved
+  </Step>
+  <Step title="Report Generation">
+    Synthesizes findings into a comprehensive narrative report with visualizations
+  </Step>
+</Steps>
+
+## Key Features
+
+### Thought Signatures for Reasoning Continuity
+
+All cognitive components share a single Gemini conversation, maintaining context across 100+ API calls. This means Gemini can reference results from iteration 1 when designing iteration 10.
+
+### Four Cognitive Components
+
+| Component | Role | Output |
+|-----------|------|--------|
+| **ExperimentDesigner** | Designs next experiment based on data profile, history, and constraints | Structured JSON: model, hyperparameters, preprocessing |
+| **ResultsAnalyzer** | Compares current results against baseline and best | Trend detection, metric comparison, observations |
+| **HypothesisGenerator** | Synthesizes all iterations into ranked next steps | Hypotheses with confidence scores, explore/exploit strategy |
+| **ReportGenerator** | Writes final narrative report | Markdown with executive summary, methodology, insights |
+
+### Supported Models
+
+- **scikit-learn**: LinearRegression, LogisticRegression, RandomForest, GradientBoosting, SVM, and more
+- **XGBoost**: XGBRegressor, XGBClassifier
+- **LightGBM**: LGBMRegressor, LGBMClassifier
+
+### Automatic Preprocessing
+
+Gemini decides per experiment — no fixed pipeline:
+- Missing value handling (drop, mean, median, mode imputation)
+- Feature scaling (standard, min-max, or none)
+- Categorical encoding (one-hot, ordinal)
+- Target transformations (log, sqrt for skewed distributions)
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                   ML EXPERIMENT AUTOPILOT                   │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │                 ORCHESTRATION LAYER                    │ │
+│  │ ExperimentController — main loop & state machine       │ │
+│  │ Pydantic state management — JSON with type validation  │ │
+│  └────────────────────────────────────────────────────────┘ │
+│                             │                               │
+│                             ▼                               │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │           COGNITIVE CORE  (Gemini 3 Flash)             │ │
+│  │  ExperimentDesigner — designs next experiment          │ │
+│  │  ResultsAnalyzer — compares results, detects trends    │ │
+│  │  HypothesisGenerator — hypotheses with confidence      │ │
+│  │  ReportGenerator — publication-ready narrative reports │ │
+│  │  Thought Signatures maintain reasoning continuity      │ │
+│  └────────────────────────────────────────────────────────┘ │
+│                             │                               │
+│                             ▼                               │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │                 EXECUTION LAYER                        │ │
+│  │  DataProfiler — schema, stats, missing values          │ │
+│  │  CodeGenerator — Jinja2 template-based Python scripts  │ │
+│  │  ExperimentRunner — subprocess execution with timeout  │ │
+│  └────────────────────────────────────────────────────────┘ │
+│                             │                               │
+│                             ▼                               │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │                  PERSISTENCE LAYER                     │ │
+│  │  MLflow tracking — metrics, params, artifacts          │ │
+│  │  JSON state files — resumable experiment sessions      │ │
+│  └────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Why This Qualifies for "The Marathon Agent"
+
+- **Autonomous**: Runs 20+ iterations without human intervention
+- **Long-Running**: Maintains context across multi-hour execution via Thought Signatures
+- **Self-Correcting**: Learns from failures, adjusts strategy, detects performance plateaus
+- **Explainable**: Every decision is documented with Gemini's reasoning
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card
+    title="Quickstart"
+    icon="rocket"
+    href="/quickstart"
+  >
+    Run your first experiment in under 5 minutes
+  </Card>
+  <Card
+    title="Installation"
+    icon="download"
+    href="/installation"
+  >
+    Complete setup and configuration guide
+  </Card>
+  <Card
+    title="CLI Reference"
+    icon="terminal"
+    href="/cli/overview"
+  >
+    All command-line options and arguments
+  </Card>
+  <Card
+    title="Examples"
+    icon="code"
+    href="/examples/regression"
+  >
+    Real-world examples with regression and classification
+  </Card>
+</CardGroup>

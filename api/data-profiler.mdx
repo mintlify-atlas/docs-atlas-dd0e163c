@@ -1,0 +1,217 @@
+---
+title: DataProfiler API
+description: Profile datasets for ML experimentation with statistical analysis and schema detection
+---
+
+## Overview
+
+The `DataProfiler` class analyzes datasets to provide comprehensive profiling including:
+- Schema information (columns, types)
+- Statistical summaries
+- Missing value analysis
+- Categorical variable analysis
+- Target variable analysis
+
+## Class Definition
+
+### DataProfiler
+
+```python
+from src.execution.data_profiler import DataProfiler
+
+profiler = DataProfiler(
+    data_path=Path("data.csv"),
+    target_column="target",
+    task_type="classification"
+)
+```
+
+<ParamField path="data_path" type="Path" required>
+  Path to the dataset file (CSV or Parquet)
+</ParamField>
+
+<ParamField path="target_column" type="str" required>
+  Name of the target column for prediction
+</ParamField>
+
+<ParamField path="task_type" type="str" required>
+  Type of ML task: `'classification'` or `'regression'`
+</ParamField>
+
+## Methods
+
+### load_data()
+
+Load the dataset from file into a pandas DataFrame.
+
+```python
+df = profiler.load_data()
+```
+
+**Returns:** `pd.DataFrame` - Loaded pandas DataFrame
+
+**Raises:**
+- `FileNotFoundError` - If the dataset file does not exist
+- `ValueError` - If file format is not supported or cannot be parsed
+
+**Supported formats:**
+- CSV (`.csv`)
+- Parquet (`.parquet`)
+
+### profile()
+
+Generate a complete profile of the dataset.
+
+```python
+profile = profiler.profile()
+```
+
+**Returns:** `DataProfile` - Pydantic model containing:
+
+<ResponseField name="n_rows" type="int">
+  Total number of rows in the dataset
+</ResponseField>
+
+<ResponseField name="n_columns" type="int">
+  Total number of columns
+</ResponseField>
+
+<ResponseField name="columns" type="list[str]">
+  List of all column names
+</ResponseField>
+
+<ResponseField name="column_types" type="dict[str, str]">
+  Mapping of column names to their data types
+</ResponseField>
+
+<ResponseField name="numeric_columns" type="list[str]">
+  List of numeric column names
+</ResponseField>
+
+<ResponseField name="categorical_columns" type="list[str]">
+  List of categorical column names (object, category, bool types)
+</ResponseField>
+
+<ResponseField name="target_column" type="str">
+  Name of the target column
+</ResponseField>
+
+<ResponseField name="target_type" type="str">
+  Type of target: `'numeric'` or `'categorical'`
+</ResponseField>
+
+<ResponseField name="missing_values" type="dict[str, int]">
+  Count of missing values per column
+</ResponseField>
+
+<ResponseField name="missing_percentages" type="dict[str, float]">
+  Percentage of missing values per column
+</ResponseField>
+
+<ResponseField name="numeric_stats" type="dict[str, dict[str, float]]">
+  Statistical summary for numeric columns:
+  - `mean`: Mean value
+  - `std`: Standard deviation
+  - `min`: Minimum value
+  - `25%`, `50%`, `75%`: Quartiles
+  - `max`: Maximum value
+  - `skew`: Skewness coefficient
+</ResponseField>
+
+<ResponseField name="categorical_stats" type="dict[str, dict]">
+  Statistics for categorical columns:
+  - `n_unique`: Number of unique values
+  - `top_values`: Top 10 most frequent values
+  - `cardinality_ratio`: Ratio of unique values to total values
+</ResponseField>
+
+<ResponseField name="target_stats" type="dict[str, Any]">
+  Target-specific statistics:
+  
+  **For classification:**
+  - `n_classes`: Number of unique classes
+  - `class_distribution`: Count per class
+  - `class_balance`: Ratio of min to max class counts
+  
+  **For regression:**
+  - Same statistics as numeric columns (mean, std, quartiles, etc.)
+</ResponseField>
+
+**Raises:**
+- `ValueError` - If target column not found or dataset has insufficient rows
+
+### get_profile_summary()
+
+Get a human-readable text summary of the profile.
+
+```python
+summary_text = profiler.get_profile_summary()
+print(summary_text)
+```
+
+**Returns:** `str` - Formatted summary including:
+- Dataset name and shape
+- Target information
+- Feature counts
+- Missing value summary
+- Target variable statistics
+
+### to_dict()
+
+Convert profile to dictionary for JSON serialization.
+
+```python
+profile_dict = profiler.to_dict()
+```
+
+**Returns:** `dict` - Dictionary representation of the DataProfile
+
+## Complete Example
+
+```python
+from pathlib import Path
+from src.execution.data_profiler import DataProfiler
+
+# Initialize profiler
+profiler = DataProfiler(
+    data_path=Path("housing.csv"),
+    target_column="price",
+    task_type="regression"
+)
+
+# Load and profile data
+df = profiler.load_data()
+profile = profiler.profile()
+
+# Access profile information
+print(f"Dataset shape: {profile.n_rows} x {profile.n_columns}")
+print(f"Numeric features: {len(profile.numeric_columns)}")
+print(f"Categorical features: {len(profile.categorical_columns)}")
+
+# Check for missing values
+missing_cols = {col: pct for col, pct in profile.missing_percentages.items() if pct > 0}
+if missing_cols:
+    print(f"Columns with missing data: {missing_cols}")
+
+# Get target statistics
+print(f"Target stats: {profile.target_stats}")
+
+# Get summary text
+print(profiler.get_profile_summary())
+```
+
+## Data Validation
+
+The profiler automatically validates:
+
+<Warning>
+  Dataset must have at least 2 rows for train/test splitting. A warning is shown if fewer than 10 rows.
+</Warning>
+
+<Warning>
+  Target column must exist in the dataset, otherwise `ValueError` is raised with available columns listed.
+</Warning>
+
+## Source Location
+
+`~/workspace/source/src/execution/data_profiler.py`

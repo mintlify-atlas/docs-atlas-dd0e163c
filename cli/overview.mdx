@@ -1,0 +1,118 @@
+---
+title: CLI Overview
+description: Introduction to the ML Experiment Autopilot command-line interface
+---
+
+The ML Experiment Autopilot CLI provides a simple yet powerful interface for running autonomous machine learning experiments. The CLI is built with Typer and features rich terminal output with progress tracking and detailed logging.
+
+## Installation
+
+After installing the package, the `autopilot` command becomes available in your terminal:
+
+```bash
+pip install ml-experiment-autopilot
+```
+
+## Basic Usage
+
+The primary command is `run`, which starts an experiment session:
+
+```bash
+autopilot run --data train.csv --target SalePrice --task regression
+```
+
+This minimal command will:
+1. Profile your dataset
+2. Design and run ML experiments
+3. Analyze results and generate hypotheses
+4. Iterate to improve performance
+5. Generate a final report
+
+## Getting Help
+
+View all available commands and arguments:
+
+```bash
+autopilot --help
+```
+
+Get detailed help for the run command:
+
+```bash
+autopilot run --help
+```
+
+## Version Information
+
+Check the installed version:
+
+```bash
+autopilot --version
+# or
+autopilot -V
+```
+
+## Quick Start Example
+
+Here's a complete example for a regression task:
+
+```bash
+autopilot run \
+  --data housing_data.csv \
+  --target price \
+  --task regression \
+  --constraints constraints.md \
+  --max-iterations 30 \
+  --time-budget 7200 \
+  --output-dir ./results \
+  --verbose
+```
+
+For classification tasks:
+
+```bash
+autopilot run \
+  --data customer_churn.csv \
+  --target churned \
+  --task classification \
+  --max-iterations 20
+```
+
+## Terminal Output
+
+The CLI provides rich terminal output with:
+- Colorful status indicators
+- Progress bars for long-running operations
+- Structured tables for experiment results
+- Real-time metrics updates
+- Detailed reasoning steps (with `--verbose` flag)
+
+## Interrupting Experiments
+
+You can safely interrupt a running experiment with `Ctrl+C`. The autopilot will:
+1. Save the current state
+2. Preserve all completed experiments
+3. Display the path to the state file
+
+You can then resume using the `--resume` flag:
+
+```bash
+autopilot run --resume ./outputs/experiment_20240315_143022/state.json
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Run Command" icon="play" href="/cli/run-command">
+    Detailed documentation of the run command
+  </Card>
+  <Card title="Arguments Reference" icon="sliders" href="/cli/arguments">
+    Complete list of all CLI arguments
+  </Card>
+  <Card title="Constraints" icon="file-lines" href="/cli/constraints">
+    Learn how to write constraint files
+  </Card>
+  <Card title="Configuration" icon="gear" href="/installation">
+    Configure API keys and settings
+  </Card>
+</CardGroup>

@@ -1,0 +1,362 @@
+---
+title: CLI Arguments
+description: Complete reference for all command-line arguments
+---
+
+This page provides a comprehensive reference for all CLI arguments available in ML Experiment Autopilot.
+
+## Global Options
+
+These options are available for the main `autopilot` command:
+
+<ParamField path="--version" type="boolean">
+  Display the version number and exit.
+  
+  **Short form:** `-V`
+  
+  **Example:**
+  ```bash
+  autopilot --version
+  # Output: ML Experiment Autopilot v0.1.0
+  ```
+</ParamField>
+
+<ParamField path="--help">
+  Show help message with available commands and exit.
+  
+  **Example:**
+  ```bash
+  autopilot --help
+  ```
+</ParamField>
+
+## Run Command Arguments
+
+All arguments for the `autopilot run` command.
+
+### Required Arguments
+
+<ParamField path="--data" type="path" required>
+  Path to dataset file (CSV or Parquet format).
+  
+  **Short form:** `-d`
+  
+  **Validation:**
+  - File must exist
+  - File must be readable
+  - Must be a file (not a directory)
+  
+  **Supported formats:**
+  - `.csv` - Comma-separated values
+  - `.parquet` - Apache Parquet
+  
+  **Examples:**
+  ```bash
+  # CSV file
+  autopilot run --data ./data/train.csv -t price --task regression
+  
+  # Parquet file
+  autopilot run -d ~/datasets/housing.parquet -t SalePrice --task regression
+  
+  # Absolute path
+  autopilot run --data /home/user/data/customers.csv -t churned --task classification
+  ```
+</ParamField>
+
+<ParamField path="--target" type="string" required>
+  Name of the target column for prediction.
+  
+  **Short form:** `-t`
+  
+  **Validation:**
+  - Column must exist in the dataset
+  - Column name is case-sensitive
+  
+  **Examples:**
+  ```bash
+  # Simple column name
+  autopilot run -d data.csv --target price --task regression
+  
+  # Column with spaces (use quotes)
+  autopilot run -d data.csv --target "Sale Price" --task regression
+  
+  # Case-sensitive matching
+  autopilot run -d data.csv --target SalePrice --task regression
+  ```
+</ParamField>
+
+<ParamField path="--task" type="enum" required>
+  Type of machine learning task.
+  
+  **Allowed values:**
+  - `classification` - Categorical target variable
+  - `regression` - Continuous target variable
+  
+  **Examples:**
+  ```bash
+  # Classification
+  autopilot run -d data.csv -t churned --task classification
+  
+  # Regression
+  autopilot run -d data.csv -t price --task regression
+  ```
+</ParamField>
+
+### Optional Arguments
+
+<ParamField path="--constraints" type="path">
+  Path to constraints file (Markdown format).
+  
+  **Short form:** `-c`
+  
+  **Default:** `None`
+  
+  **Validation:**
+  - File must exist if specified
+  - File must be readable
+  - Must be a file (not a directory)
+  
+  **Examples:**
+  ```bash
+  # With constraints
+  autopilot run -d data.csv -t price --task regression -c constraints.md
+  
+  # Without constraints
+  autopilot run -d data.csv -t price --task regression
+  ```
+  
+  See [Constraints](/cli/constraints) for file format details.
+</ParamField>
+
+<ParamField path="--max-iterations" type="integer">
+  Maximum number of experiment iterations.
+  
+  **Short form:** `-n`
+  
+  **Default:** `20`
+  
+  **Range:** 1-100
+  
+  **Validation:**
+  - Must be at least 1
+  - Cannot exceed 100
+  
+  **Examples:**
+  ```bash
+  # Default (20 iterations)
+  autopilot run -d data.csv -t price --task regression
+  
+  # Custom iterations
+  autopilot run -d data.csv -t price --task regression --max-iterations 50
+  
+  # Short form
+  autopilot run -d data.csv -t price --task regression -n 30
+  
+  # Minimum value
+  autopilot run -d data.csv -t price --task regression -n 1
+  
+  # Maximum value
+  autopilot run -d data.csv -t price --task regression -n 100
+  ```
+</ParamField>
+
+<ParamField path="--time-budget" type="integer">
+  Time budget in seconds for the experiment session.
+  
+  **Default:** `3600` (1 hour)
+  
+  **Range:** 60-86400 (1 minute to 24 hours)
+  
+  **Validation:**
+  - Minimum: 60 seconds (1 minute)
+  - Maximum: 86400 seconds (24 hours)
+  
+  **Examples:**
+  ```bash
+  # Default (1 hour)
+  autopilot run -d data.csv -t price --task regression
+  
+  # 30 minutes
+  autopilot run -d data.csv -t price --task regression --time-budget 1800
+  
+  # 2 hours
+  autopilot run -d data.csv -t price --task regression --time-budget 7200
+  
+  # 6 hours
+  autopilot run -d data.csv -t price --task regression --time-budget 21600
+  
+  # 24 hours (maximum)
+  autopilot run -d data.csv -t price --task regression --time-budget 86400
+  ```
+  
+  **Common durations:**
+  - 30 minutes: `1800`
+  - 1 hour: `3600`
+  - 2 hours: `7200`
+  - 4 hours: `14400`
+  - 8 hours: `28800`
+  - 12 hours: `43200`
+  - 24 hours: `86400`
+</ParamField>
+
+<ParamField path="--output-dir" type="path">
+  Directory where results will be saved.
+  
+  **Short form:** `-o`
+  
+  **Default:** Auto-generated timestamped directory in `./outputs/`
+  
+  **Auto-generated format:** `./outputs/experiment_YYYYMMDD_HHMMSS/`
+  
+  **Examples:**
+  ```bash
+  # Auto-generated output directory
+  autopilot run -d data.csv -t price --task regression
+  # Creates: ./outputs/experiment_20240315_143022/
+  
+  # Custom output directory
+  autopilot run -d data.csv -t price --task regression -o ./my_experiment
+  
+  # Absolute path
+  autopilot run -d data.csv -t price --task regression --output-dir /home/user/results
+  
+  # Relative path
+  autopilot run -d data.csv -t price --task regression -o ../results/housing_exp
+  ```
+  
+  <Note>
+  The directory will be created if it doesn't exist.
+  </Note>
+</ParamField>
+
+<ParamField path="--verbose" type="boolean">
+  Show detailed Gemini reasoning and decision-making process.
+  
+  **Short form:** `-v`
+  
+  **Default:** `false`
+  
+  **Examples:**
+  ```bash
+  # Normal output
+  autopilot run -d data.csv -t price --task regression
+  
+  # Verbose output
+  autopilot run -d data.csv -t price --task regression --verbose
+  
+  # Short form
+  autopilot run -d data.csv -t price --task regression -v
+  ```
+  
+  **Verbose output includes:**
+  - Gemini's reasoning for each decision
+  - Detailed hypothesis generation process
+  - Full experiment planning steps
+  - Extended error messages and stack traces
+</ParamField>
+
+<ParamField path="--resume" type="path">
+  Resume from a previously saved state file.
+  
+  **Default:** `None`
+  
+  **Validation:**
+  - File must exist
+  - File must be readable
+  - Must be a valid state file (JSON format)
+  
+  **Examples:**
+  ```bash
+  # Resume from auto-generated state file
+  autopilot run --resume ./outputs/experiment_20240315_143022/state.json
+  
+  # Resume from custom output directory
+  autopilot run --resume ./my_experiment/state.json
+  ```
+  
+  <Warning>
+  When using `--resume`, all other arguments are ignored as they are loaded from the state file.
+  </Warning>
+</ParamField>
+
+## Argument Combinations
+
+### Quick Start
+
+Minimal required arguments:
+
+```bash
+autopilot run -d train.csv -t price --task regression
+```
+
+### Production Run
+
+All common arguments for a production scenario:
+
+```bash
+autopilot run \
+  --data production_data.parquet \
+  --target conversion_rate \
+  --task regression \
+  --constraints prod_constraints.md \
+  --max-iterations 100 \
+  --time-budget 28800 \
+  --output-dir ./prod_run_$(date +%Y%m%d) \
+  --verbose
+```
+
+### Short Forms
+
+Using all short-form arguments:
+
+```bash
+autopilot run -d data.csv -t price --task regression -c constraints.md -n 30 -o ./results -v
+```
+
+## Help Commands
+
+Get help at any level:
+
+```bash
+# Main help
+autopilot --help
+
+# Run command help
+autopilot run --help
+```
+
+## Terminal Output Example
+
+When you run a command, you'll see output like this:
+
+```bash
+$ autopilot run -d housing.csv -t SalePrice --task regression -n 25 -v
+
+╭───────────────────────────────────────────╮
+│  ML Experiment Autopilot v0.1.0           │
+│  Powered by Google Gemini                 │
+╰───────────────────────────────────────────╯
+
+Configuration:
+  Data: housing.csv
+  Target: SalePrice
+  Task: regression
+  Max Iterations: 25
+  Time Budget: 3600s (1h 0m)
+  Constraints: None
+  Verbose: Yes
+
+[1/6] Profiling dataset...
+✓ Dataset profiling complete (1461 rows, 81 columns)
+
+[2/6] Designing experiments...
+✓ Experiment plan created (5 initial experiments)
+
+...
+```
+
+## See Also
+
+- [Run Command](/cli/run-command) - Detailed run command documentation
+- [Constraints](/cli/constraints) - Constraint file format
+- [Configuration](/installation) - Environment and API setup

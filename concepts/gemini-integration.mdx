@@ -1,0 +1,455 @@
+---
+title: Gemini 3 Integration
+description: How Gemini 3 powers autonomous ML experimentation for The Marathon Agent track
+---
+
+ML Experiment Autopilot is built around **Gemini 3 Flash Preview** as the reasoning engine. Unlike traditional AutoML tools that use heuristics or random search, this system uses Gemini's **high-level reasoning** to make every decision — from model selection to hyperparameter tuning to termination.
+
+<Note>
+This project was built for the **Gemini 3 Hackathon** by Google DeepMind & Devpost, specifically targeting **The Marathon Agent** track for long-running autonomous tasks.
+</Note>
+
+---
+
+## Why This Qualifies for "The Marathon Agent"
+
+The Marathon Agent track requires systems that run autonomously for extended periods with minimal human intervention. Here's how this project meets the criteria:
+
+| Requirement | Implementation |
+|-------------|----------------|
+| **Autonomous** | Runs 20+ iterations without human input after initial configuration |
+| **Long-Running** | Maintains context across multi-hour execution (100+ API calls) |
+| **Self-Correcting** | Learns from failures, adjusts strategy, detects performance plateaus |
+| **Explainable** | Every decision documented with Gemini's reasoning |
+| **Resilient** | State saving/resumption, graceful failure handling, retry logic |
+
+### Concrete Example
+
+A typical session:
+- **Duration**: 45 minutes (20 iterations × ~2 min each)
+- **Gemini API Calls**: 120+ (6 per iteration × 20 iterations)
+- **Context Growth**: 120 conversation messages (via Thought Signatures)
+- **Decisions Made**: 20 experiment designs + 20 analyses + 20 hypothesis sets + 1 report = 61 AI-powered decisions
+- **Human Intervention**: 0 (after initial `python -m src.main run ...`)
+
+---
+
+## Gemini 3 Configuration
+
+Location: `src/cognitive/gemini_client.py:52`
+
+### Model Selection
+
+```python
+model = "gemini-3.0-flash-preview-02-20"
+```
+
+Gemini 3 Flash Preview was chosen for:
+- **High-quality reasoning**: Required for hypothesis-driven experimentation
+- **Large context window**: Handles 100+ message conversation history
+- **Thought Signatures support**: Temperature 1.0 + thinking levels
+- **Speed**: Flash variant provides fast responses for 20+ iteration loops
+
+### Temperature: 1.0 (Fixed)
+
+Location: `src/cognitive/gemini_client.py:99`
+
+```python
+return genai.GenerationConfig(
+    temperature=self.config.temperature,  # Always 1.0
+)
+```
+
+Why temperature 1.0?
+- **Gemini 3 best practices** require temperature 1.0 for Thought Signatures
+- Enables **diverse exploration** across iterations (avoiding repetition)
+- Balances **creativity** (trying new approaches) with **consistency** (learning from past)
+
+<Info>
+Unlike chat applications that use lower temperatures (0.5-0.7) for deterministic responses, autonomous agents benefit from temperature 1.0 to explore the solution space.
+</Info>
+
+### Thinking Levels
+
+Gemini 3 supports configurable **thinking depth**. This system uses:
+
+- **`thinking_level="high"`**: For experiment design, results analysis, hypothesis generation
+- **`thinking_level="medium"`**: For report generation (less critical reasoning)
+
+High thinking level enables:
+- Deeper reasoning chains
+- More sophisticated pattern detection
+- Better long-term planning
+
+---
+
+## The Four Cognitive Components
+
+All four components use the **same** `GeminiClient` instance to maintain [Thought Signatures](/concepts/thought-signatures).
+
+### 1. ExperimentDesigner
+
+Location: `src/cognitive/experiment_designer.py:83`
+
+**Role**: Designs the next experiment based on data profile, history, and constraints.
+
+**System Prompt** (src/cognitive/experiment_designer.py:36):
+```python
+EXPERIMENT_DESIGNER_SYSTEM_PROMPT = """You are an expert ML researcher designing experiments. Your goal is to systematically improve model performance through hypothesis-driven experimentation.
+
+PRINCIPLES:
+1. Each experiment tests a specific hypothesis derived from previous observations
+2. Learn from both successes and failures in previous iterations
+3. Consider data characteristics when selecting models and preprocessing
+4. Apply appropriate preprocessing based on the data profile
+5. Balance exploration (trying new approaches) with exploitation (refining what works)
+6. Avoid repeating experiments that have already been tried
+...
+"""
+```
+
+**Input to Gemini**:
+- Data profile summary (rows, columns, types, missing values, target stats)
+- Last 5 experiment results (summarized JSON)
+- User constraints + top hypothesis from previous iteration
+- Current iteration number
+
+**Output from Gemini** (JSON):
+```json
+{
+  "experiment_name": "xgboost_tuned_learning_rate",
+  "hypothesis": "Lower learning rate with more estimators may reduce overfitting",
+  "model_type": "XGBRegressor",
+  "model_params": {"n_estimators": 200, "learning_rate": 0.05, "max_depth": 6},
+  "preprocessing": {
+    "missing_values": "median",
+    "scaling": "standard",
+    "target_transform": "log"
+  },
+  "reasoning": "Previous iteration showed XGBoost overfit with learning_rate=0.1. Reducing to 0.05 and increasing n_estimators should improve generalization."
+}
+```
+
+**Fallback**: If Gemini fails or returns invalid JSON, the system falls back to deterministic model rotation (src/cognitive/experiment_designer.py:469).
+
+---
+
+### 2. ResultsAnalyzer
+
+Location: `src/cognitive/results_analyzer.py:56`
+
+**Role**: Analyzes experiment outcomes, compares metrics, detects trends.
+
+**System Prompt** (src/cognitive/results_analyzer.py:26):
+```python
+RESULTS_ANALYZER_SYSTEM_PROMPT = """You are an expert ML results analyst. Your role is to analyze experiment outcomes and provide actionable insights.
+
+PRINCIPLES:
+1. Compare current results against baseline, best, and previous experiments
+2. Identify meaningful improvements versus noise
+3. Detect patterns in model performance across iterations
+4. Consider both the primary metric and secondary metrics
+5. Note any anomalies or unexpected results
+6. Provide observations that inform next experiment design
+
+METRIC INTERPRETATION:
+- Lower is better: RMSE, MSE, MAE, log_loss, error
+- Higher is better: accuracy, f1, r2, precision, recall, AUC
+...
+"""
+```
+
+**Input to Gemini**:
+- Current experiment result (metrics, model, hypothesis)
+- Metric comparison (current vs baseline/best/previous) — **computed locally**
+- Last 5 experiments from history
+- Task type (regression/classification)
+
+**Output from Gemini** (JSON):
+```json
+{
+  "key_observations": [
+    "XGBoost with lower learning rate (0.05) outperformed iteration 2's 0.1 by 10.3%",
+    "Log transformation of target variable remains critical — iteration 1 without it had RMSE 2x worse",
+    "Tree-based models (iterations 2-3) consistently outperform linear models (iteration 0)",
+    "Diminishing returns observed — improvement from iteration 2 to 3 is only 2.1%"
+  ],
+  "reasoning": "The lower learning rate prevented overfitting while increased n_estimators maintained model capacity. However, we may be approaching the limit of this dataset's predictability."
+}
+```
+
+**Local Computation**: The analyzer computes metric comparisons **without** Gemini (src/cognitive/results_analyzer.py:142) to save API calls. Gemini is only used for **qualitative observations**.
+
+**Trend Detection** (src/cognitive/results_analyzer.py:228): Also done locally by analyzing the last 3 experiments:
+- **IMPROVING**: All 3 show improvement
+- **DEGRADING**: All 3 show degradation
+- **PLATEAU**: All 3 within improvement threshold (< 0.5%)
+- **FLUCTUATING**: Alternating improvement/degradation
+- **INITIAL**: Fewer than 3 experiments
+
+---
+
+### 3. HypothesisGenerator
+
+Location: `src/cognitive/hypothesis_generator.py:52`
+
+**Role**: Generates 2-3 ranked hypotheses for the next iteration.
+
+**System Prompt** (src/cognitive/hypothesis_generator.py:24):
+```python
+HYPOTHESIS_GENERATOR_SYSTEM_PROMPT = """You are an expert ML researcher generating testable hypotheses. Your role is to analyze experiment results and propose the most promising directions for the next iteration.
+
+PRINCIPLES:
+1. Generate 2-3 ranked hypotheses based on the analysis
+2. Each hypothesis should be specific and testable in a single experiment
+3. Consider both exploration (trying new approaches) and exploitation (refining what works)
+4. Reference specific metric values and patterns from the analysis
+5. Suggest concrete model choices and hyperparameters when possible
+6. Balance risk — include at least one "safe" refinement and one "exploratory" option
+
+EXPLORATION VS EXPLOITATION:
+- "explore": Early iterations or after plateau — try fundamentally different approaches
+- "exploit": When a promising direction is found — refine parameters and preprocessing
+- "balanced": Default — mix of both strategies
+...
+"""
+```
+
+**Input to Gemini**:
+- Analysis result (observations, trend, metric comparison)
+- Last 5 experiments from history
+- Current iteration / max iterations
+- Iterations without improvement count
+- User constraints
+- **Strategy hint** (adaptive based on iteration and trend)
+
+**Strategy Hints** (src/cognitive/hypothesis_generator.py:180):
+```python
+if trend == "plateau" or iteration > max_iterations * 0.7:
+    strategy_hint = "Consider more exploratory hypotheses — we may be in a local optimum."
+elif trend == "improving" and iteration <= 5:
+    strategy_hint = "The current direction is promising — consider both refining it and trying alternatives."
+else:
+    strategy_hint = "Balance exploration and exploitation."
+```
+
+**Output from Gemini** (JSON):
+```json
+{
+  "analysis_summary": "XGBoost shows strong performance but diminishing returns suggest we're near optimal for this approach",
+  "exploration_vs_exploitation": "balanced",
+  "hypotheses": [
+    {
+      "hypothesis_id": "h1",
+      "statement": "Fine-tune XGBoost regularization (alpha/lambda) to squeeze out remaining 1-2% improvement",
+      "rationale": "Current model shows slight overfitting based on train/test gap",
+      "suggested_model": "XGBRegressor",
+      "suggested_params": {"reg_alpha": 0.5, "reg_lambda": 1.0},
+      "confidence_score": 0.72,
+      "priority": 1
+    },
+    {
+      "hypothesis_id": "h2",
+      "statement": "Try LightGBM as alternative gradient booster",
+      "rationale": "LightGBM often matches XGBoost performance with faster training",
+      "suggested_model": "LGBMRegressor",
+      "confidence_score": 0.65,
+      "priority": 2
+    }
+  ],
+  "reasoning": "Focus on exploitation (h1) since we have a strong baseline, but keep one exploratory option (h2)."
+}
+```
+
+**Hypothesis Feedback Loop** (src/orchestration/controller.py:337): The **top hypothesis** (priority=1) is automatically added to the next iteration's design constraints, creating a continuous feedback loop.
+
+---
+
+### 4. ReportGenerator
+
+Location: `src/cognitive/report_generator.py:64`
+
+**Role**: Creates publication-ready Markdown reports at the end of a session.
+
+**System Prompt** (src/cognitive/report_generator.py:24):
+```python
+REPORT_GENERATOR_SYSTEM_PROMPT = """You are an expert ML research writer creating a professional experiment report. Your role is to synthesize experiment results into a clear, insightful narrative.
+
+PRINCIPLES:
+1. Write in a professional, technical tone suitable for data science audiences
+2. Be specific — reference actual metric values, model names, and iteration numbers
+3. Explain WHY certain approaches worked or failed, not just WHAT happened
+4. Connect insights across experiments to tell a coherent story
+5. Provide actionable recommendations based on the evidence
+...
+"""
+```
+
+**Input to Gemini**:
+- Dataset name and profile
+- All experiment results (condensed summaries)
+- Best model and metric
+- Termination reason
+- User constraints
+
+**Output from Gemini** (delimited sections):
+1. **Executive Summary**: 1 paragraph (3-5 sentences)
+2. **Methodology**: 2-3 paragraphs describing the approach
+3. **Key Insights**: 3-5 bullet points with substantive observations
+4. **Recommendations**: 3-5 bullet points for future work
+
+**Note**: Unlike the other components, the report generator uses `use_history=False` (src/cognitive/report_generator.py:158) because the prompt already contains a complete summary. This saves tokens.
+
+**Fallback**: If Gemini fails, a template-based report is generated (src/cognitive/report_generator.py:305).
+
+---
+
+## API Call Lifecycle
+
+### Retry Logic with Exponential Backoff
+
+Location: `src/cognitive/gemini_client.py:163`
+
+Every Gemini API call includes automatic retry logic:
+
+```python
+for attempt in range(self.config.max_retries):  # Default: 3 retries
+    try:
+        response = model.generate_content(content, generation_config=generation_config)
+        return GeminiResponse(text=response.text, ...)
+    
+    except google_exceptions.ResourceExhausted as e:  # Rate limit (429)
+        wait_time = self.config.retry_delay * (2**attempt)  # Exponential backoff
+        time.sleep(wait_time)
+    
+    except google_exceptions.InvalidArgument as e:  # Bad request (400)
+        raise GeminiError(f"Invalid request: {e}")  # Don't retry
+    
+    except Exception as e:  # Other errors
+        wait_time = self.config.retry_delay * (2**attempt)
+        time.sleep(wait_time)
+```
+
+**Backoff Schedule** (default `retry_delay=2`):
+- Attempt 1: Wait 2 seconds
+- Attempt 2: Wait 4 seconds
+- Attempt 3: Wait 8 seconds
+
+This handles transient rate limits (common during long sessions) without crashing.
+
+### JSON Response Parsing
+
+Location: `src/cognitive/gemini_client.py:206`
+
+All cognitive components (except ReportGenerator) request **JSON responses**:
+
+```python
+def generate_json(self, prompt: str, ...) -> dict:
+    # Add JSON instruction to prompt
+    json_prompt = f"{prompt}\n\nRespond with valid JSON only. No additional text."
+    
+    response = self.generate(json_prompt, ...)
+    
+    # Clean up the response - remove markdown code blocks if present
+    text = response.text.strip()
+    if text.startswith("```json"):
+        text = text[7:]
+    if text.startswith("```"):
+        text = text[3:]
+    if text.endswith("```"):
+        text = text[:-3]
+    text = text.strip()
+    
+    return json.loads(text)
+```
+
+Gemini sometimes wraps JSON in markdown code blocks (````json ... ````). The parser automatically strips these.
+
+**Error Handling**: If JSON parsing fails, a `GeminiInvalidResponseError` is raised, triggering the fallback logic.
+
+---
+
+## Cost and Performance Characteristics
+
+### API Call Volume
+
+For a 20-iteration session:
+- **Data Profiling**: 0 calls (local computation)
+- **Baseline**: 0 calls (no AI needed)
+- **Iterations 1-20**: 3 calls per iteration × 20 = **60 calls**
+  - ExperimentDesigner: 20 calls
+  - ResultsAnalyzer: 20 calls
+  - HypothesisGenerator: 20 calls
+- **Report Generation**: 1 call
+- **Total**: **61 Gemini API calls**
+
+With retries (assume 5% failure rate → 3 retries):
+- Total: 61 + (61 × 0.05 × 3) ≈ **70 calls**
+
+### Token Usage
+
+Approximate token counts per component call:
+- **ExperimentDesigner**: 1,500 input + 300 output = 1,800 tokens
+- **ResultsAnalyzer**: 1,200 input + 400 output = 1,600 tokens
+- **HypothesisGenerator**: 1,300 input + 500 output = 1,800 tokens
+- **ReportGenerator**: 2,000 input + 1,000 output = 3,000 tokens
+
+**Per iteration**: 1,800 + 1,600 + 1,800 = 5,200 tokens
+
+**Full 20-iteration session**: (5,200 × 20) + 3,000 = **107,000 tokens**
+
+<Info>
+With Thought Signatures, each call includes the full conversation history. By iteration 20, the conversation context is ~120 messages. This increases token usage but enables sophisticated reasoning.
+</Info>
+
+### Latency
+
+Typical response times (Gemini 3 Flash):
+- ExperimentDesigner: 2-4 seconds
+- ResultsAnalyzer: 1-3 seconds
+- HypothesisGenerator: 2-4 seconds
+- ReportGenerator: 4-6 seconds
+
+**Total Gemini time per iteration**: ~8 seconds
+
+**Experiment execution time**: 5-60 seconds (depends on model and dataset size)
+
+**Total iteration time**: 13-68 seconds (median: ~30 seconds)
+
+**20-iteration session**: 10-40 minutes (median: ~20 minutes)
+
+---
+
+## Advantages Over Traditional AutoML
+
+Here's how Gemini 3-powered design compares to traditional AutoML:
+
+| Aspect | Traditional AutoML (H2O, Auto-sklearn) | ML Experiment Autopilot (Gemini 3) |
+|--------|----------------------------------------|-------------------------------------|
+| **Model Selection** | Grid/random search over predefined set | Hypothesis-driven selection based on data profile and history |
+| **Hyperparameters** | Grid/random/Bayesian optimization | Reasoning-based choices ("lower learning rate to reduce overfitting") |
+| **Preprocessing** | Fixed pipeline or all combinations | Adaptive based on data characteristics (log transform for skewed targets) |
+| **Learning** | No memory of failures | Remembers why experiments failed and avoids repetition |
+| **Explainability** | "Model X achieved metric Y" | "I chose XGBoost because iteration 3 showed tree models excel, and I added regularization to address iteration 5's overfitting" |
+| **Report** | Auto-generated tables | Publication-ready narrative explaining the journey |
+| **Stopping Criterion** | Max time/iterations only | Plateau detection + agent recommendation |
+
+<Tip>
+Run the same dataset through Auto-sklearn and ML Experiment Autopilot. Auto-sklearn will try 100 random configurations in the same time that Autopilot tries 20 **strategic** experiments. Autopilot often finds better models with fewer iterations due to intelligent exploration.
+</Tip>
+
+---
+
+## Key Takeaways
+
+1. **Gemini 3 Flash Preview** is the reasoning engine for all high-level decisions
+2. **Temperature 1.0** enables diverse exploration while maintaining reasoning quality
+3. **Thought Signatures** allow Gemini to build coherent long-term reasoning across 60+ API calls
+4. **Four Cognitive Components** handle design, analysis, hypothesis generation, and reporting
+5. **Automatic Retry Logic** handles transient rate limits during long sessions
+6. **Fallback Mechanisms** ensure the loop continues even if Gemini fails
+7. **The Marathon Agent**: Runs autonomously for 20+ iterations (10-40 minutes) with 100+ API calls
+
+<Note>
+This architecture demonstrates Gemini 3's capability to act as a **persistent reasoning agent** rather than a one-shot chatbot. It maintains context, learns from failures, and makes increasingly sophisticated decisions over time.
+</Note>

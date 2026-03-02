@@ -1,0 +1,666 @@
+---
+title: Troubleshooting
+description: Common issues and solutions for ML Experiment Autopilot
+---
+
+## Overview
+
+This guide covers common issues you may encounter when using ML Experiment Autopilot, along with solutions and debugging strategies.
+
+## Installation & Setup Issues
+
+<AccordionGroup>
+  <Accordion title="ImportError: No module named 'src'">
+    **Error**:
+    ```
+    ModuleNotFoundError: No module named 'src'
+    ```
+
+    **Cause**: Running the script incorrectly (not as a module)
+
+    **Solution**: Always run as a module:
+    ```bash
+    # ❌ Wrong
+    python src/main.py run ...
+
+    # ✓ Correct
+    python -m src.main run ...
+    ```
+
+    From the README troubleshooting section (line 512).
+  </Accordion>
+
+  <Accordion title="GEMINI_API_KEY not found">
+    **Error**:
+    ```
+    ValueError: GEMINI_API_KEY environment variable is required.
+    Please set it in your .env file or environment.
+    ```
+
+    **Cause**: Missing or misconfigured API key
+
+    **Solution**:
+    ```bash
+    # Create .env file
+    cp .env.example .env
+
+    # Edit .env and add your key
+    GEMINI_API_KEY=your_actual_key_here
+
+    # Verify .env is in project root
+    ls -la .env
+
+    # Test key is loaded
+    python -c "from src.config import get_config; c = get_config(); print('API key loaded')"
+    ```
+
+    Get a free API key from [Google AI Studio](https://aistudio.google.com/apikey).
+
+    From the README troubleshooting section (line 514).
+  </Accordion>
+
+  <Accordion title="MLflow UI shows no experiments">
+    **Error**: MLflow UI opens but shows "No experiments"
+
+    **Cause**: Incorrect `--backend-store-uri`
+
+    **Solution**: Verify the URI points to `outputs/mlruns`:
+    ```bash
+    # ❌ Wrong (default location)
+    mlflow ui
+
+    # ✓ Correct
+    mlflow ui --backend-store-uri file:./outputs/mlruns
+
+    # Open http://127.0.0.1:5000
+    ```
+
+    From the README troubleshooting section (line 515).
+  </Accordion>
+</AccordionGroup>
+
+## Data & Configuration Issues
+
+<AccordionGroup>
+  <Accordion title="Target column not found">
+    **Error**:
+    ```
+    KeyError: 'SalePrice'
+    # or
+    ValueError: Target column 'SalePrice' not found in dataset
+    ```
+
+    **Cause**: Target column name doesn't match dataset (case-sensitive)
+
+    **Solution**:
+    ```bash
+    # Check column names in dataset
+    python -c "import pandas as pd; print(pd.read_csv('data/my_data.csv').columns.tolist())"
+
+    # Use exact column name (case-sensitive)
+    python -m src.main run \
+      --data data/my_data.csv \
+      --target SalePrice \  # Must match exactly
+      --task regression
+    ```
+
+    From the README troubleshooting section (line 519).
+  </Accordion>
+
+  <Accordion title="Unsupported file format">
+    **Error**:
+    ```
+    ValueError: Unsupported file format: .xlsx
+    ```
+
+    **Cause**: Dataset is not CSV or Parquet
+
+    **Solution**: Convert to CSV:
+    ```python
+    import pandas as pd
+
+    # From Excel
+    df = pd.read_excel('data.xlsx')
+    df.to_csv('data.csv', index=False)
+
+    # From JSON
+    df = pd.read_json('data.json')
+    df.to_csv('data.csv', index=False)
+    ```
+
+    Then run with CSV:
+    ```bash
+    python -m src.main run --data data.csv --target <target> --task <task>
+    ```
+  </Accordion>
+
+  <Accordion title="Dataset too large (memory error)">
+    **Error**:
+    ```
+    MemoryError: Unable to allocate array
+    # or
+    Killed (process killed by OS)
+    ```
+
+    **Cause**: Dataset exceeds available memory
+
+    **Solution**: Sample the dataset:
+    ```python
+    import pandas as pd
+
+    # Load and sample
+    df = pd.read_csv('large_data.csv')
+    sampled = df.sample(n=50000, random_state=42)  # 50K rows
+    sampled.to_csv('sampled_data.csv', index=False)
+    ```
+
+    Or use Parquet for better memory efficiency:
+    ```python
+    df.to_parquet('data.parquet', index=False)
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Experiment Execution Issues
+
+<AccordionGroup>
+  <Accordion title="Experiment timeout">
+    **Error**:
+    ```
+    Experiment timed out after 300 seconds
+    ```
+
+    **Cause**: Experiment exceeded the 300-second timeout (defined in `src/config.py:54`)
+
+    **Solution**: Increase timeout in configuration:
+    ```python
+    # Edit src/config.py
+    @dataclass
+    class ExperimentDefaults:
+        experiment_timeout: int = 600  # Increase to 600 seconds
+    ```
+
+    Or use `--time-budget` to allow more total time:
+    ```bash
+    python -m src.main run ... --time-budget 7200  # 2 hours total
+    ```
+
+    From the README troubleshooting section (line 516).
+  </Accordion>
+
+  <Accordion title="Generated code syntax error">
+    **Error**:
+    ```
+    SyntaxError: invalid syntax
+    # in generated experiment script
+    ```
+
+    **Cause**: Code generation template error or corrupted output
+
+    **Solution**: Inspect the generated code:
+    ```bash
+    # Find generated scripts
+    ls outputs/experiments/<session_id>/
+
+    # View problematic script
+    cat outputs/experiments/<session_id>/experiment_3.py
+
+    # Check syntax
+    python -m py_compile outputs/experiments/<session_id>/experiment_3.py
+    ```
+
+    Code is validated with `ast.parse()` before execution (in `src/execution/code_generator.py`). If this error occurs, it's a bug—please report it.
+
+    From the README troubleshooting section (line 518).
+  </Accordion>
+
+  <Accordion title="Import errors in generated code">
+    **Error**:
+    ```
+    ModuleNotFoundError: No module named 'xgboost'
+    # in experiment execution
+    ```
+
+    **Cause**: Missing optional dependency
+
+    **Solution**: Install required packages:
+    ```bash
+    # Install XGBoost
+    pip install xgboost
+
+    # Install LightGBM
+    pip install lightgbm
+
+    # Or reinstall all requirements
+    pip install -r requirements.txt
+    ```
+  </Accordion>
+
+  <Accordion title="Multiple experiments fail consecutively">
+    **Observation**: 3+ experiments fail in a row with errors
+
+    **Causes**:
+    - Data quality issues (e.g., too many missing values)
+    - Incompatible hyperparameters
+    - Gemini generating invalid configurations
+
+    **Debugging**:
+    ```bash
+    # Run with verbose to see Gemini's reasoning
+    python -m src.main run ... --verbose
+
+    # Check error messages in MLflow
+    mlflow ui --backend-store-uri file:./outputs/mlruns
+    # Download error.txt artifacts from failed runs
+
+    # Inspect generated code
+    cat outputs/experiments/<session_id>/experiment_<N>.py
+    ```
+
+    **Solutions**:
+    - Add constraints to guide Gemini toward working approaches
+    - Simplify dataset (remove problematic features)
+    - Manually test a simple model to verify data integrity
+  </Accordion>
+</AccordionGroup>
+
+## Gemini API Issues
+
+<AccordionGroup>
+  <Accordion title="Gemini rate limit (429)">
+    **Error**:
+    ```
+    google.api_core.exceptions.ResourceExhausted: 429 Resource exhausted
+    ```
+
+    **Cause**: Exceeded Gemini API rate limits
+
+    **How it's handled**: Automatic retry with exponential backoff (max 3 retries, defined in `src/config.py:36`)
+
+    **If retries fail**:
+    - Reduce iteration frequency (increase `--time-budget`)
+    - Upgrade API tier at [Google AI Studio](https://aistudio.google.com/)
+    - Wait and resume later with `--resume`
+
+    From the README troubleshooting section (line 517).
+  </Accordion>
+
+  <Accordion title="Gemini invalid response">
+    **Error**:
+    ```
+    GeminiInvalidResponseError: Expected JSON, got malformed response
+    ```
+
+    **Cause**: Gemini returned non-JSON or incomplete response
+
+    **How it's handled**: Falls back to basic analysis (in `ResultsAnalyzer._get_fallback_analysis()`)
+
+    **If persistent**:
+    - Check API key validity
+    - Verify network connectivity
+    - Try again later (may be temporary API issue)
+  </Accordion>
+
+  <Accordion title="Gemini context length exceeded">
+    **Error**:
+    ```
+    google.api_core.exceptions.InvalidArgument: 400 Context length exceeded
+    ```
+
+    **Cause**: Conversation history + data profile too long for Gemini's context window
+
+    **Solution**: Reduce experiment history size:
+    - Use fewer iterations (`--max-iterations 10`)
+    - Simplify constraints file
+    - Start fresh session instead of very long runs
+  </Accordion>
+</AccordionGroup>
+
+## Performance & Quality Issues
+
+<AccordionGroup>
+  <Accordion title="No improvement after baseline">
+    **Observation**: Iterations 1-5 show no improvement over baseline
+
+    **Causes**:
+    - Dataset is simple (baseline already near-optimal)
+    - Insufficient feature information
+    - Poor data quality
+
+    **Debugging**:
+    ```bash
+    # Check data profile
+    cat outputs/state_<session_id>.json | jq '.data_profile'
+
+    # Review baseline performance
+    mlflow ui --backend-store-uri file:./outputs/mlruns
+
+    # Check metric values
+    # If baseline R² > 0.9, dataset may be too simple
+    ```
+
+    **Solutions**:
+    - Add feature engineering via preprocessing
+    - Use constraints to suggest specific strategies
+    - Verify dataset has predictive features
+  </Accordion>
+
+  <Accordion title="Plateau detected prematurely">
+    **Observation**: Experiment stops after 3 iterations with "Performance plateau detected"
+
+    **Cause**: Improvement < 0.5% for 3 consecutive iterations (defined in `src/config.py:52-53`)
+
+    **Solution**: Adjust plateau threshold:
+    ```python
+    # Edit src/config.py
+    @dataclass
+    class ExperimentDefaults:
+        plateau_threshold: int = 5  # Increase to 5 iterations
+        improvement_threshold: float = 0.002  # Lower to 0.2%
+    ```
+
+    Or use constraints:
+    ```markdown
+    ## Termination
+    - Continue for at least 10 iterations
+    - Ignore small plateaus
+    ```
+  </Accordion>
+
+  <Accordion title="Gemini ignores constraints">
+    **Observation**: Experiments don't follow specified constraints
+
+    **Debugging**:
+    ```bash
+    # Run with verbose to see reasoning
+    python -m src.main run ... --constraints constraints.md --verbose
+
+    # Check if constraints were parsed
+    # Look for constraint mentions in Gemini's reasoning output
+    ```
+
+    **Solutions**:
+    - Make constraints more explicit and specific
+    - Avoid contradictory requirements
+    - Add rationale: "Prefer tree-based models because..."
+    - Check constraint file path is correct
+  </Accordion>
+
+  <Accordion title="High variance in metrics across iterations">
+    **Observation**: Metrics fluctuate wildly (e.g., RMSE: 0.2 → 0.8 → 0.3)
+
+    **Causes**:
+    - Inconsistent preprocessing across experiments
+    - High-variance models (e.g., deep trees without regularization)
+    - Small dataset with train/test split instability
+
+    **Solutions**:
+    - Add constraints to standardize preprocessing
+    - Increase dataset size if possible
+    - Use cross-validation (future feature)
+    - Guide toward stable model families via constraints
+  </Accordion>
+</AccordionGroup>
+
+## Output & Reporting Issues
+
+<AccordionGroup>
+  <Accordion title="Visualization generation fails">
+    **Warning**:
+    ```
+    Visualization generation failed: <error>
+    ```
+
+    **Cause**: Matplotlib backend issue or missing data
+
+    **How it's handled**: Gracefully degrades—report still generates without plots
+
+    **If you need visualizations**:
+    ```bash
+    # Check matplotlib backend
+    python -c "import matplotlib; print(matplotlib.get_backend())"
+    # Should be 'Agg' for headless
+
+    # Verify state has experiment data
+    cat outputs/state_<session_id>.json | jq '.experiments | length'
+
+    # Manually regenerate plots
+    python -c "
+    from src.execution.visualization_generator import VisualizationGenerator
+    from src.orchestration.state import ExperimentState
+    from pathlib import Path
+
+    state = ExperimentState.load(Path('outputs/state_<session_id>.json'))
+    viz = VisualizationGenerator()
+    viz.generate(state, Path('outputs'))
+    "
+    ```
+  </Accordion>
+
+  <Accordion title="Report generation fails">
+    **Warning**:
+    ```
+    Report generation failed: <error>
+    ```
+
+    **Cause**: Gemini API error or insufficient experiment data
+
+    **Debugging**:
+    ```bash
+    # Check state has experiments
+    cat outputs/state_<session_id>.json | jq '.experiments'
+
+    # Verify Gemini API access
+    python -c "from src.cognitive.gemini_client import GeminiClient; c = GeminiClient(); print('OK')"
+    ```
+
+    **Workaround**: Generate report manually from state:
+    ```bash
+    # State file contains all data needed for manual analysis
+    cat outputs/state_<session_id>.json | jq '.experiments[] | {name, model_type, metrics}'
+    ```
+  </Accordion>
+
+  <Accordion title="Output directory permissions error">
+    **Error**:
+    ```
+    PermissionError: [Errno 13] Permission denied: 'outputs/'
+    ```
+
+    **Solution**:
+    ```bash
+    # Fix permissions
+    chmod -R u+w outputs/
+
+    # Or use custom output directory
+    python -m src.main run ... --output-dir ~/my_results
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Resume & State Issues
+
+<AccordionGroup>
+  <Accordion title="State file corrupted">
+    **Error**:
+    ```
+    json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+    ```
+
+    **Cause**: State file corrupted or truncated
+
+    **Solution**:
+    ```bash
+    # Validate JSON
+    python -c "import json; json.load(open('outputs/state_<session_id>.json'))"
+
+    # If corrupted, restore from backup or restart
+    # Check if backup exists
+    ls -lh outputs/state_<session_id>.json.*
+
+    # If no backup, start new session
+    ```
+  </Accordion>
+
+  <Accordion title="Cannot resume: data path mismatch">
+    **Error**:
+    ```
+    ValueError: Data path in state does not match provided --data argument
+    ```
+
+    **Cause**: `--data` argument different from original session
+
+    **Solution**: Use exact same arguments:
+    ```bash
+    # Check original arguments in state
+    cat outputs/state_<session_id>.json | jq '.config'
+
+    # Match exactly
+    python -m src.main run \
+      --data <original_path> \
+      --target <original_target> \
+      --task <original_task> \
+      --resume outputs/state_<session_id>.json
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Debugging Strategies
+
+### Enable Verbose Mode
+
+Always run with `--verbose` when debugging:
+
+```bash
+python -m src.main run ... --verbose
+```
+
+This shows:
+- Gemini's reasoning for each experiment
+- Hypothesis generation process
+- Analysis observations
+- Full error tracebacks
+
+### Inspect Generated Code
+
+Generated scripts are saved in `outputs/experiments/{session_id}/`:
+
+```bash
+# List generated scripts
+ls -lh outputs/experiments/<session_id>/
+
+# View a specific experiment
+cat outputs/experiments/<session_id>/experiment_3.py
+
+# Run manually for debugging
+python outputs/experiments/<session_id>/experiment_3.py
+```
+
+### Check MLflow Artifacts
+
+MLflow stores detailed artifacts:
+
+```bash
+# Launch MLflow UI
+mlflow ui --backend-store-uri file:./outputs/mlruns
+
+# Navigate to failed run
+# Download artifacts:
+# - error.txt (error message)
+# - reasoning.txt (Gemini's reasoning)
+# - experiment_N.py (generated code)
+```
+
+### Review State File
+
+The state file contains complete session history:
+
+```bash
+# View full state
+cat outputs/state_<session_id>.json | jq .
+
+# Check specific sections
+cat outputs/state_<session_id>.json | jq '.experiments[-1]'  # Last experiment
+cat outputs/state_<session_id>.json | jq '.best_metric'      # Best metric
+cat outputs/state_<session_id>.json | jq '.phase'            # Current phase
+```
+
+### Test Components Individually
+
+Isolate issues by testing components:
+
+```python
+# Test data loading
+import pandas as pd
+df = pd.read_csv('data/my_data.csv')
+print(df.head())
+print(df.columns.tolist())
+
+# Test Gemini client
+from src.cognitive.gemini_client import GeminiClient
+client = GeminiClient()
+response = client.generate_json(
+    prompt='Return a JSON object: {"test": "success"}',
+    system_instruction='Return valid JSON'
+)
+print(response)
+
+# Test data profiler
+from src.execution.data_profiler import DataProfiler
+profiler = DataProfiler('data/my_data.csv', 'target', 'regression')
+profile = profiler.profile()
+print(profile.model_dump_json(indent=2))
+```
+
+## Getting Help
+
+If you encounter an issue not covered here:
+
+<Steps>
+  <Step title="Check Logs">
+    Run with `--verbose` and review all output:
+    ```bash
+    python -m src.main run ... --verbose 2>&1 | tee debug.log
+    ```
+  </Step>
+
+  <Step title="Gather Context">
+    Collect:
+    - Error message and traceback
+    - State file: `outputs/state_<session_id>.json`
+    - Generated code: `outputs/experiments/<session_id>/`
+    - MLflow error artifacts
+  </Step>
+
+  <Step title="Report Issue">
+    Report issues at the GitHub repository with:
+    - Python version: `python --version`
+    - OS: `uname -a` or Windows version
+    - Error message and logs
+    - Steps to reproduce
+  </Step>
+</Steps>
+
+## Common Error Messages Reference
+
+| Error Message | Section | Quick Fix |
+|--------------|---------|----------|
+| `No module named 'src'` | Installation | Run as module: `python -m src.main` |
+| `GEMINI_API_KEY not found` | Setup | Create `.env` with API key |
+| `MLflow UI shows no experiments` | MLflow | Use `--backend-store-uri file:./outputs/mlruns` |
+| `Target column not found` | Data | Check column name (case-sensitive) |
+| `Experiment timed out` | Execution | Increase timeout in `src/config.py` |
+| `429 Resource exhausted` | Gemini | Wait for retry or upgrade API tier |
+| `Syntax error in generated code` | Execution | Inspect `outputs/experiments/`, report bug |
+| `State file corrupted` | Resume | Restore from backup or restart |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Running Experiments" icon="rocket" href="/guides/running-experiments">
+    Return to the main guide
+  </Card>
+  <Card title="Understanding Results" icon="chart-line" href="/guides/understanding-results">
+    Learn to interpret outputs
+  </Card>
+</CardGroup>

@@ -1,0 +1,480 @@
+---
+title: Understanding Results
+description: How to interpret experiment results, metrics, and outputs from ML Experiment Autopilot
+---
+
+## Overview
+
+ML Experiment Autopilot generates comprehensive results for every experiment iteration. This guide explains how to interpret metrics, analysis outputs, trend patterns, and final reports.
+
+## Result Structure
+
+Each experiment produces an `ExperimentResult` (defined in `src/orchestration/state.py:70-88`) containing:
+
+```python
+class ExperimentResult:
+    experiment_name: str          # e.g., "xgboost_tuned_lr"
+    iteration: int                # 0 = baseline, 1+ = iterations
+    model_type: str               # e.g., "XGBRegressor"
+    model_params: dict            # Hyperparameters used
+    preprocessing: PreprocessingConfig
+    metrics: dict[str, float]     # All computed metrics
+    hypothesis: str               # Hypothesis being tested
+    reasoning: str                # Gemini's reasoning
+    execution_time: float         # Seconds to train + evaluate
+    success: bool                 # True if completed successfully
+    error_message: str | None     # If failed
+    code_path: str                # Path to generated script
+    timestamp: datetime
+```
+
+## Console Output
+
+During execution, results are displayed with rich formatting:
+
+### Iteration Header
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ ITERATION 3 / 20                                            │
+│ Experiment: xgboost_regularized                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Results Panel
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ RESULTS                                                     │
+├─────────────────────────────────────────────────────────────┤
+│ Success: ✓                                                  │
+│ Execution time: 12.3 seconds                                │
+│                                                             │
+│ Metrics:                                                    │
+│   rmse: 0.1332                                              │
+│   mae: 0.0891                                               │
+│   r2: 0.8456                                                │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│ ★ NEW BEST                                                  │
+│ xgboost_regularized                                         │
+│ rmse: 0.1332 (82.1% better than baseline)                  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Analysis Output
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ RESULTS ANALYSIS                                            │
+├─────────────────────────────────────────────────────────────┤
+│ Trend: IMPROVING                                            │
+│ RMSE: 0.1332   ★ NEW BEST                                   │
+│   82.1% better than baseline                                │
+│                                                             │
+│ Key Observations:                                           │
+│   - Boosting provided 10.3% improvement over bagging        │
+│   - Log transformation remains critical for this target     │
+│   - Diminishing returns suggest stopping after next round   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Metrics Explained
+
+### Regression Metrics
+
+For `--task regression`, the autopilot computes:
+
+<ResponseField name="rmse" type="float">
+  **Root Mean Squared Error** — Lower is better
+
+  Average prediction error magnitude. Penalizes large errors more than MAE.
+
+  ```python
+  rmse = sqrt(mean((y_true - y_pred)²))
+  ```
+
+  **Typical values**: 0.1-1.0 for normalized targets, higher for raw scales
+</ResponseField>
+
+<ResponseField name="mae" type="float">
+  **Mean Absolute Error** — Lower is better
+
+  Average absolute difference between predictions and actuals.
+
+  ```python
+  mae = mean(|y_true - y_pred|)
+  ```
+
+  More interpretable than RMSE; less sensitive to outliers.
+</ResponseField>
+
+<ResponseField name="r2" type="float">
+  **R² Score (Coefficient of Determination)** — Higher is better (max 1.0)
+
+  Proportion of variance explained by the model.
+
+  ```python
+  r2 = 1 - (sum((y_true - y_pred)²) / sum((y_true - mean(y_true))²))
+  ```
+
+  - **1.0**: Perfect predictions
+  - **0.0**: No better than predicting the mean
+  - **Negative**: Worse than predicting the mean
+</ResponseField>
+
+### Classification Metrics
+
+For `--task classification`, the autopilot computes:
+
+<ResponseField name="accuracy" type="float">
+  **Accuracy** — Higher is better (0-1)
+
+  Fraction of correct predictions.
+
+  ```python
+  accuracy = (TP + TN) / (TP + TN + FP + FN)
+  ```
+
+  **Caution**: Misleading for imbalanced datasets.
+</ResponseField>
+
+<ResponseField name="f1" type="float">
+  **F1 Score** — Higher is better (0-1)
+
+  Harmonic mean of precision and recall.
+
+  ```python
+  f1 = 2 * (precision * recall) / (precision + recall)
+  ```
+
+  Better for imbalanced datasets than accuracy.
+</ResponseField>
+
+<ResponseField name="precision" type="float">
+  **Precision** — Higher is better (0-1)
+
+  Fraction of positive predictions that are correct.
+
+  ```python
+  precision = TP / (TP + FP)
+  ```
+</ResponseField>
+
+<ResponseField name="recall" type="float">
+  **Recall (Sensitivity)** — Higher is better (0-1)
+
+  Fraction of actual positives correctly identified.
+
+  ```python
+  recall = TP / (TP + FN)
+  ```
+</ResponseField>
+
+<ResponseField name="roc_auc" type="float">
+  **ROC AUC** — Higher is better (0.5-1.0)
+
+  Area under the ROC curve. Measures separability.
+
+  - **1.0**: Perfect separation
+  - **0.5**: Random guessing
+</ResponseField>
+
+## Metric Comparisons
+
+The `ResultsAnalyzer` (defined in `src/cognitive/results_analyzer.py:142-226`) computes comparisons:
+
+```python
+class MetricComparison:
+    metric_name: str                    # e.g., "rmse"
+    current_value: float                # Current iteration value
+    baseline_value: float | None        # Iteration 0 value
+    best_value: float | None            # Best across all iterations
+    previous_value: float | None        # Previous iteration value
+    change_from_baseline_pct: float     # % improvement from baseline
+    change_from_best_pct: float         # % difference from best
+    change_from_previous_pct: float     # % change from previous
+    is_improvement: bool                # Exceeds improvement threshold
+    is_new_best: bool                   # New best value achieved
+```
+
+### Improvement Calculation
+
+The autopilot correctly handles "lower is better" vs "higher is better" metrics:
+
+**Lower is better** (RMSE, MAE, MSE, log_loss):
+```python
+improvement_pct = ((baseline - current) / |baseline|) * 100
+# Positive % = improvement (lower value)
+```
+
+**Higher is better** (accuracy, F1, R², precision, recall):
+```python
+improvement_pct = ((current - baseline) / |baseline|) * 100
+# Positive % = improvement (higher value)
+```
+
+<Tip>
+  The default improvement threshold is **0.5%** relative change. This is configurable in `src/config.py:53`.
+</Tip>
+
+## Trend Patterns
+
+The `ResultsAnalyzer` detects performance trends across iterations (defined in `src/orchestration/state.py:38-45`):
+
+<ResponseField name="IMPROVING" type="trend">
+  Consistent improvement over last 2+ iterations (each >0.5% better).
+
+  **Action**: Continue current strategy (exploitation).
+</ResponseField>
+
+<ResponseField name="DEGRADING" type="trend">
+  Consistent degradation over last 2+ iterations.
+
+  **Action**: Explore different model families or preprocessing.
+</ResponseField>
+
+<ResponseField name="PLATEAU" type="trend">
+  Less than 0.5% change for 2+ consecutive iterations.
+
+  **Action**: Consider stopping or trying radical changes.
+</ResponseField>
+
+<ResponseField name="FLUCTUATING" type="trend">
+  Alternating improvement and degradation.
+
+  **Action**: Reduce exploration, focus on stable approaches.
+</ResponseField>
+
+<ResponseField name="INITIAL" type="trend">
+  Fewer than 3 experiments; insufficient data for pattern detection.
+
+  **Action**: Continue exploring.
+</ResponseField>
+
+## Analysis Result
+
+Each iteration produces an `AnalysisResult` (defined in `src/orchestration/state.py:152-162`):
+
+```python
+class AnalysisResult:
+    experiment_name: str
+    iteration: int
+    success: bool
+    primary_metric: MetricComparison | None
+    trend_pattern: TrendPattern
+    key_observations: list[str]      # Gemini-generated insights
+    reasoning: str                   # Detailed analysis
+    timestamp: datetime
+```
+
+### Key Observations
+
+Gemini generates 3-5 specific, actionable observations per iteration:
+
+```json
+[
+  "XGBoost with max_depth=5 achieved RMSE of 0.1332, 10.3% better than RandomForest",
+  "Log transformation of target variable remains critical—untransformed models fail",
+  "Learning rate 0.05 provides better generalization than 0.1 (validation RMSE)",
+  "Feature importance shows 'MedInc' and 'AveRooms' dominate predictions",
+  "Diminishing returns observed: last 2 iterations improved by <2% each"
+]
+```
+
+## Hypotheses
+
+After analysis, Gemini generates ranked hypotheses for the next iteration (defined in `src/orchestration/state.py:165-191`):
+
+```python
+class Hypothesis:
+    hypothesis_id: str               # "h1", "h2", "h3"
+    statement: str                   # Clear hypothesis statement
+    rationale: str                   # Why worth testing
+    suggested_model: str | None      # e.g., "LGBMRegressor"
+    suggested_params: dict           # Recommended hyperparameters
+    confidence_score: float          # 0-1 confidence in success
+    priority: int                    # 1=highest, 3=lowest
+
+class HypothesisSet:
+    iteration: int
+    analysis_summary: str
+    hypotheses: list[Hypothesis]     # 1-3 hypotheses
+    exploration_vs_exploitation: str # "explore", "exploit", "balanced"
+    reasoning: str
+```
+
+### Example Hypothesis Output
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ HYPOTHESES FOR NEXT ITERATION                               │
+├─────────────────────────────────────────────────────────────┤
+│ Strategy: exploit                                           │
+│                                                             │
+│ 1. [Priority: 1] Fine-tune XGBoost regularization          │
+│    Confidence: 0.72 | Models: XGBRegressor                  │
+│    Rationale: XGBoost shows best performance; alpha/lambda  │
+│    tuning may reduce overfitting observed in validation     │
+│                                                             │
+│ 2. [Priority: 2] Try LightGBM as alternative booster        │
+│    Confidence: 0.65 | Models: LGBMRegressor                 │
+│    Rationale: LightGBM often faster and comparable to XGB   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Final Report
+
+At completion, Gemini generates a narrative Markdown report in `outputs/reports/` containing:
+
+### Report Sections
+
+<Steps>
+  <Step title="Executive Summary">
+    High-level overview of the experimental journey:
+    - Dataset characteristics (rows, features, task type)
+    - Total iterations completed
+    - Best model and performance
+    - Key insights discovered
+  </Step>
+
+  <Step title="Methodology">
+    - Data profiling results
+    - Baseline model selection
+    - Experiment design approach
+    - Termination criteria
+  </Step>
+
+  <Step title="Results Table">
+    Sortable table with all experiments:
+
+    | Iteration | Experiment | Model | RMSE | R² | Success |
+    |-----------|-----------|-------|------|----|---------|
+    | 0 | baseline | LinearRegression | 0.7456 | 0.6012 | ✓ |
+    | 1 | log_transform | RandomForestRegressor | 0.4201 | 0.7834 | ✓ |
+    | 2 | xgboost_tuned | XGBRegressor | 0.1332 | 0.8456 | ✓ |
+  </Step>
+
+  <Step title="Best Model Details">
+    - Model type and hyperparameters
+    - Preprocessing configuration
+    - Final metrics with comparisons
+    - Feature importance (if available)
+  </Step>
+
+  <Step title="Key Insights">
+    Gemini's narrative insights:
+    - Why certain approaches worked
+    - Failed experiments and learnings
+    - Recommendations for production
+    - Suggestions for further improvement
+  </Step>
+
+  <Step title="Visualizations">
+    Embedded charts:
+    - Metric progression across iterations (line chart)
+    - Model comparison (bar chart)
+    - Improvement over baseline (bar chart)
+
+    Generated by `VisualizationGenerator` in `src/execution/visualization_generator.py`.
+  </Step>
+
+  <Step title="Experiment Appendix">
+    Per-experiment details:
+    - Full hypothesis and reasoning
+    - Complete hyperparameters
+    - Preprocessing steps
+    - Execution time
+    - Error messages (if failed)
+  </Step>
+</Steps>
+
+## Session State
+
+The complete experiment state is saved to `outputs/state_{session_id}.json`:
+
+```json
+{
+  "session_id": "a1b2c3d4",
+  "config": {
+    "data_path": "data/sample/california_housing.csv",
+    "target_column": "MedHouseVal",
+    "task_type": "regression",
+    "max_iterations": 5,
+    "primary_metric": "rmse"
+  },
+  "data_profile": { ... },
+  "experiments": [ ... ],
+  "current_iteration": 5,
+  "phase": "completed",
+  "best_metric": 0.1332,
+  "best_experiment": "xgboost_regularized",
+  "termination_reason": "Performance plateau detected"
+}
+```
+
+This file can be used to:
+- Resume interrupted experiments (`--resume`)
+- Audit experimental history
+- Reproduce results
+- Analyze Gemini's decision patterns
+
+## Interpreting Common Patterns
+
+<AccordionGroup>
+  <Accordion title="Large Baseline-to-Best Gap">
+    **Observation**: Best model is 80%+ better than baseline.
+
+    **Interpretation**: 
+    - Dataset benefits significantly from sophisticated models
+    - Baseline (linear model) was too simple
+    - Gemini successfully identified effective strategies
+
+    **Action**: Trust the best model; consider even more iterations.
+  </Accordion>
+
+  <Accordion title="Early Plateau">
+    **Observation**: No improvement after 3-5 iterations.
+
+    **Interpretation**:
+    - Dataset may be simple (baseline already near-optimal)
+    - Limited feature information available
+    - Need different preprocessing (feature engineering)
+
+    **Action**: Review data quality; consider manual feature engineering.
+  </Accordion>
+
+  <Accordion title="Failed Experiments">
+    **Observation**: Multiple experiments fail with errors.
+
+    **Interpretation**:
+    - Check `error_message` in results
+    - Common causes: memory issues, hyperparameter conflicts, data type mismatches
+    - Generated code saved in `outputs/experiments/` for debugging
+
+    **Action**: See [Troubleshooting](/guides/troubleshooting) guide.
+  </Accordion>
+
+  <Accordion title="Fluctuating Performance">
+    **Observation**: Metrics vary wildly between iterations.
+
+    **Interpretation**:
+    - High variance models (e.g., deep trees without regularization)
+    - Train/test split instability
+    - Data leakage or inconsistent preprocessing
+
+    **Action**: Check preprocessing consistency; consider cross-validation.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="MLflow Tracking" icon="flask" href="/guides/mlflow-tracking">
+    Explore detailed metrics in the MLflow UI
+  </Card>
+  <Card title="Troubleshooting" icon="wrench" href="/guides/troubleshooting">
+    Resolve common issues and errors
+  </Card>
+</CardGroup>

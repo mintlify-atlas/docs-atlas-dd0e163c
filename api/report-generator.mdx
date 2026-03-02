@@ -1,0 +1,473 @@
+---
+title: ReportGenerator
+description: Gemini-powered publication-ready Markdown report generation
+---
+
+## Overview
+
+The `ReportGenerator` creates comprehensive, publication-ready Markdown reports at the end of an autopilot run. It uses a single Gemini API call for narrative sections and locally builds structured sections like tables and metadata.
+
+### Key Features
+
+- Single Gemini call for all narrative sections (efficient API usage)
+- Complete fallback report if Gemini fails (template-only)
+- Locally-built structured sections (tables, statistics)
+- Saves report with timestamped filename
+- Includes visualizations, appendices, and full experiment history
+- Professional, technical tone suitable for data science audiences
+
+## Class Definition
+
+```python
+class ReportGenerator:
+    """Generates publication-ready Markdown reports using Gemini 3.
+
+    Key features:
+    - Single Gemini call for all narrative sections (efficient API usage)
+    - Complete fallback report if Gemini fails (template-only)
+    - Locally-built structured sections (tables, stats)
+    - Saves report with timestamped filename
+    """
+
+    def __init__(self, gemini_client: GeminiClient):
+        """Initialize the report generator.
+
+        Args:
+            gemini_client: Shared GeminiClient instance for API calls.
+        """
+```
+
+## Constructor
+
+<ParamField path="gemini_client" type="GeminiClient" required>
+  Shared `GeminiClient` instance for API calls.
+</ParamField>
+
+## Methods
+
+### generate
+
+Generate the final experiment report.
+
+```python
+def generate(
+    self,
+    state: ExperimentState,
+    output_dir: Path,
+    plot_paths: Optional[list[Path]] = None,
+) -> Path:
+    """Generate the final experiment report.
+
+    Args:
+        state: Complete ExperimentState after all iterations.
+        output_dir: Base output directory (reports saved to output_dir/reports/).
+        plot_paths: Optional list of paths to generated visualization PNGs.
+
+    Returns:
+        Path to the generated Markdown report file.
+    """
+```
+
+#### Parameters
+
+<ParamField path="state" type="ExperimentState" required>
+  Complete experiment state after all iterations, containing:
+  - `experiments` (list[ExperimentResult]): All experiment results
+  - `data_profile` (Optional[DataProfile]): Dataset profile
+  - `config` (Config): Configuration including task type, constraints, primary metric
+  - `best_metric` (Optional[float]): Best metric value achieved
+  - `best_experiment` (Optional[str]): Name of best experiment
+  - `current_iteration` (int): Total iterations run
+  - `termination_reason` (Optional[str]): Why the session ended
+  - `session_id` (str): Unique session identifier
+</ParamField>
+
+<ParamField path="output_dir" type="Path" required>
+  Base output directory. Reports are saved to `output_dir/reports/` with timestamped filenames.
+</ParamField>
+
+<ParamField path="plot_paths" type="Optional[list[Path]]" default="None">
+  Optional list of paths to generated visualization PNG files. These are referenced in the report's Visualizations section.
+</ParamField>
+
+#### Returns
+
+<ResponseField name="report_path" type="Path">
+  Path to the generated Markdown report file, formatted as:
+  `output_dir/reports/report_{dataset_name}_{timestamp}.md`
+  
+  Example: `output_dir/reports/report_housing_20260302_143022.md`
+</ResponseField>
+
+## Report Structure
+
+The generated report includes the following sections:
+
+### 1. Executive Summary
+One concise paragraph (3-5 sentences) covering:
+- The problem and approach
+- Total experiments conducted
+- Key finding and best result
+- Improvement over baseline
+
+### 2. Dataset Overview
+Markdown table with dataset statistics:
+- Rows and columns
+- Numeric and categorical features
+- Target column and type
+- Missing values summary
+- Target statistics (if available)
+
+### 3. Methodology
+2-3 paragraphs describing:
+- Iterative hypothesis-driven approach
+- Models explored
+- Preprocessing strategies tried
+- Termination reason
+
+### 4. Experiment Results
+
+#### Performance Summary
+Markdown table of all experiments:
+- Iteration number
+- Experiment name
+- Model type
+- Primary metric value
+- Status (OK/FAILED)
+- Hypothesis (truncated)
+
+#### Best Model
+Detailed information about the best-performing model:
+- Model type and experiment name
+- Iteration number
+- Primary metric value
+- All metrics table
+- Hyperparameters table
+- Hypothesis
+
+### 5. Key Insights
+3-5 bullet points with substantive observations:
+- Connection between experimental choices and outcomes
+- Patterns discovered across iterations
+- Specific metric references
+
+### 6. Visualizations (if provided)
+Embedded images with references to plot files:
+- Metric progression over iterations
+- Model comparison charts
+- Other generated visualizations
+
+### 7. Recommendations
+3-5 actionable bullet points for future work:
+- Based on experiment findings
+- Quick wins and longer-term suggestions
+- Model refinement opportunities
+
+### 8. Appendix
+Detailed per-experiment logs:
+- Experiment name, model, hypothesis
+- Success status and metrics
+- Error messages (if failed)
+- Execution time
+- Reasoning (truncated)
+
+### 9. Run Metadata
+Session information footer:
+- Generator attribution
+- Session ID
+- Date and time
+- Total runtime
+
+## Gemini-Generated vs Local Sections
+
+### Gemini-Generated Narrative
+- Executive Summary
+- Methodology
+- Key Insights
+- Recommendations
+
+### Locally-Built Structured
+- Dataset Overview
+- Performance Summary table
+- Best Model details
+- Visualizations
+- Appendix
+- Run Metadata
+
+## System Prompt
+
+The generator uses a comprehensive system prompt that guides Gemini to:
+
+- Write in professional, technical tone for data science audiences
+- Be specific with metric values, model names, and iteration numbers
+- Explain WHY approaches worked or failed, not just WHAT happened
+- Connect insights across experiments for a coherent narrative
+- Provide actionable recommendations based on evidence
+
+## Usage Examples
+
+### Basic Report Generation
+
+```python
+from pathlib import Path
+from src.cognitive.gemini_client import GeminiClient
+from src.cognitive.report_generator import ReportGenerator
+
+# Initialize
+client = GeminiClient()
+generator = ReportGenerator(gemini_client=client)
+
+# Generate report after autopilot completes
+report_path = generator.generate(
+    state=final_state,
+    output_dir=Path("./output")
+)
+
+print(f"Report saved to: {report_path}")
+```
+
+### With Visualizations
+
+```python
+from pathlib import Path
+
+# Generate plots
+plot_paths = [
+    Path("output/plots/metrics_over_time.png"),
+    Path("output/plots/model_comparison.png"),
+    Path("output/plots/feature_importance.png"),
+]
+
+# Generate report with visualizations
+report_path = generator.generate(
+    state=final_state,
+    output_dir=Path("./output"),
+    plot_paths=plot_paths
+)
+
+print(f"Report with {len(plot_paths)} visualizations saved to: {report_path}")
+```
+
+### Complete Autopilot Integration
+
+```python
+from pathlib import Path
+from src.orchestration.state import ExperimentState
+from src.cognitive.gemini_client import GeminiClient
+from src.cognitive.experiment_designer import ExperimentDesigner
+from src.cognitive.results_analyzer import ResultsAnalyzer
+from src.cognitive.report_generator import ReportGenerator
+
+# Shared client
+client = GeminiClient()
+
+# Initialize components
+designer = ExperimentDesigner(client)
+analyzer = ResultsAnalyzer(client)
+generator = ReportGenerator(client)
+
+# Initialize state
+state = ExperimentState(config=config)
+output_dir = Path("./output")
+
+# Run experiment loop
+for iteration in range(1, state.config.max_iterations + 1):
+    # Design and execute
+    spec = designer.design_experiment(
+        data_profile=state.data_profile,
+        previous_results=state.experiments,
+        task_type=state.config.task_type.value,
+        iteration=iteration
+    )
+    
+    result = execute_experiment(spec)
+    analysis = analyzer.analyze(result, state)
+    state.add_experiment(result)
+    
+    # Check termination
+    if should_stop(state):
+        state.termination_reason = "Maximum iterations reached"
+        break
+
+# Generate final report
+report_path = generator.generate(
+    state=state,
+    output_dir=output_dir
+)
+
+print(f"\nAutopilot complete!")
+print(f"Report: {report_path}")
+```
+
+### Custom Output Directory
+
+```python
+from pathlib import Path
+from datetime import datetime
+
+# Create custom output structure
+project_dir = Path("./ml_experiments")
+run_name = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+output_dir = project_dir / run_name
+output_dir.mkdir(parents=True, exist_ok=True)
+
+# Generate report
+report_path = generator.generate(
+    state=state,
+    output_dir=output_dir
+)
+
+print(f"Report: {report_path}")
+# Output: ./ml_experiments/run_20260302_143022/reports/report_housing_20260302_143022.md
+```
+
+### Reading Generated Report
+
+```python
+# Generate report
+report_path = generator.generate(state, output_dir)
+
+# Read and display
+with open(report_path, 'r') as f:
+    report_content = f.read()
+
+print("=" * 80)
+print(report_content)
+print("=" * 80)
+
+# Extract specific sections
+sections = report_content.split("##")
+executive_summary = sections[1] if len(sections) > 1 else ""
+print("Executive Summary:")
+print(executive_summary.strip())
+```
+
+### Error Handling and Fallback
+
+```python
+try:
+    report_path = generator.generate(
+        state=state,
+        output_dir=output_dir,
+        plot_paths=plot_paths
+    )
+    
+    # Check if fallback was used (by reading content)
+    with open(report_path, 'r') as f:
+        content = f.read()
+    
+    if "This report summarizes an automated ML experiment session" in content:
+        print("Note: Fallback report generated (Gemini unavailable)")
+    else:
+        print("Full report with Gemini-generated insights")
+    
+except Exception as e:
+    print(f"Report generation failed: {e}")
+```
+
+### Accessing Report Sections Programmatically
+
+```python
+import re
+
+# Generate report
+report_path = generator.generate(state, output_dir)
+
+# Parse report sections
+with open(report_path, 'r') as f:
+    content = f.read()
+
+# Extract sections using regex
+sections = {}
+current_section = None
+for line in content.split('\n'):
+    if line.startswith('## '):
+        current_section = line[3:].strip()
+        sections[current_section] = []
+    elif current_section:
+        sections[current_section].append(line)
+
+# Access specific sections
+if 'Key Insights' in sections:
+    insights = '\n'.join(sections['Key Insights'])
+    print("Key Insights:")
+    print(insights)
+
+if 'Recommendations' in sections:
+    recommendations = '\n'.join(sections['Recommendations'])
+    print("\nRecommendations:")
+    print(recommendations)
+```
+
+### Multi-Session Reporting
+
+```python
+from pathlib import Path
+import glob
+
+# Run multiple autopilot sessions
+output_dir = Path("./experiments")
+
+for dataset in ["housing", "iris", "wine"]:
+    # ... run autopilot for each dataset
+    
+    report_path = generator.generate(
+        state=session_state,
+        output_dir=output_dir
+    )
+    print(f"Generated report for {dataset}: {report_path}")
+
+# List all generated reports
+reports = sorted(glob.glob(str(output_dir / "reports" / "*.md")))
+print(f"\nTotal reports generated: {len(reports)}")
+for report in reports:
+    print(f"  - {Path(report).name}")
+```
+
+## Metric Direction Handling
+
+The generator correctly interprets metric improvements:
+
+### Lower is Better
+- RMSE, MSE, MAE, log_loss, error
+
+### Higher is Better  
+- accuracy, f1, r2, precision, recall, AUC
+
+Percentage improvements are calculated accordingly in the Executive Summary and Best Model sections.
+
+## Fallback Report
+
+When Gemini is unavailable, the generator creates a complete template-based report with:
+
+- Basic executive summary with session statistics
+- Methodology description of the autopilot approach
+- Generic but accurate insights based on results
+- Standard recommendations for model refinement
+- All structured sections (tables, stats) fully populated
+
+The fallback report is still comprehensive and useful, just without the Gemini-generated narrative insights.
+
+## File Naming Convention
+
+Reports are saved with the following naming pattern:
+
+```
+report_{dataset_name}_{timestamp}.md
+```
+
+Where:
+- `dataset_name`: Extracted from `config.data_path` filename stem
+- `timestamp`: Format `YYYYMMDD_HHMMSS`
+
+Examples:
+- `report_housing_20260302_143022.md`
+- `report_iris_20260302_150033.md`
+- `report_california_housing_20260302_163045.md`
+
+## See Also
+
+- [GeminiClient](/api/gemini-client) - Underlying API client
+- [ResultsAnalyzer](/api/results-analyzer) - Provides analysis data for reports
+- [HypothesisGenerator](/api/hypothesis-generator) - Provides hypothesis history
+- [ExperimentDesigner](/api/experiment-designer) - Provides experiment specifications

@@ -1,0 +1,350 @@
+---
+title: Thought Signatures
+description: How Gemini 3 maintains reasoning continuity across 100+ API calls
+---
+
+**Thought Signatures** is the core mechanism that enables ML Experiment Autopilot to run autonomously for hours while maintaining coherent reasoning across dozens of experiment iterations.
+
+## What Are Thought Signatures?
+
+Thought Signatures refer to Gemini 3's ability to maintain **multi-turn conversational context** across a long-running session. Instead of treating each API call as isolated, the system preserves the entire conversation history so Gemini can:
+
+- Reference results from iteration 1 when designing iteration 10
+- Build on previous observations and insights
+- Avoid repeating failed experiments
+- Develop increasingly sophisticated hypotheses over time
+
+<Info>
+The term "Thought Signatures" emphasizes that Gemini is not just remembering facts — it's building a **coherent line of reasoning** that evolves across the entire experiment session.
+</Info>
+
+---
+
+## Implementation
+
+### Single Shared GeminiClient
+
+Location: `src/cognitive/gemini_client.py:52`
+
+The key to Thought Signatures is using a **single** `GeminiClient` instance across all four cognitive components:
+
+```python
+# In ExperimentController.__init__ (src/orchestration/controller.py:109)
+self.gemini = GeminiClient()
+self.experiment_designer = ExperimentDesigner(self.gemini)  # Shares client
+self.results_analyzer = ResultsAnalyzer(self.gemini)        # Shares client
+self.hypothesis_generator = HypothesisGenerator(self.gemini)  # Shares client
+self.report_generator = ReportGenerator(self.gemini)        # Shares client
+```
+
+### Conversation History
+
+The `GeminiClient` maintains a growing list of all messages (src/cognitive/gemini_client.py:85):
+
+```python
+class GeminiClient:
+    def __init__(self, config: Optional[GeminiConfig] = None):
+        # ...
+        # Conversation history for multi-turn support
+        self.conversation_history: list[ConversationMessage] = []
+```
+
+Every time a cognitive component calls `generate()` or `generate_json()`, the prompt and response are **automatically appended** to this history (src/cognitive/gemini_client.py:174):
+
+```python
+# Add to conversation history
+self.conversation_history.append(
+    ConversationMessage(role="user", content=prompt)
+)
+self.conversation_history.append(
+    ConversationMessage(role="model", content=response_text)
+)
+```
+
+### Multi-Turn API Calls
+
+When generating with history enabled, the client builds a message array that includes **all previous turns** (src/cognitive/gemini_client.py:105):
+
+```python
+def _build_prompt_with_history(self, prompt: str) -> list[dict]:
+    messages = []
+    
+    # Add conversation history
+    for msg in self.conversation_history:
+        messages.append({"role": msg.role, "parts": [msg.content]})
+    
+    # Add the new prompt
+    messages.append({"role": "user", "parts": [prompt]})
+    
+    return messages
+```
+
+This means each Gemini API call receives the **entire conversation context** from the beginning of the session.
+
+---
+
+## Conversation Growth Over Time
+
+Here's how the conversation history grows during a typical 20-iteration session:
+
+| Iteration | Component Calls | Messages Added | Total Messages |
+|-----------|----------------|----------------|----------------|
+| 0 (Baseline) | None | 0 | 0 |
+| 1 | Designer → Analyzer → Generator | 6 | 6 |
+| 2 | Designer → Analyzer → Generator | 6 | 12 |
+| 5 | Designer → Analyzer → Generator | 6 | 30 |
+| 10 | Designer → Analyzer → Generator | 6 | 60 |
+| 20 | Designer → Analyzer → Generator | 6 | 120 |
+
+Each iteration adds:
+- 2 messages from **ExperimentDesigner** (prompt + response)
+- 2 messages from **ResultsAnalyzer** (prompt + response)
+- 2 messages from **HypothesisGenerator** (prompt + response)
+
+<Note>
+**ReportGenerator** does not contribute to the conversation history during iterations — it only runs once at the end with `use_history=False` to generate the final report.
+</Note>
+
+---
+
+## Visible in --verbose Mode
+
+When you run with `--verbose`, you'll see the conversation context size displayed:
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║  ITERATION 3 - GEMINI'S REASONING                            ║
+║  Thought Signature Active | Context: 12 turns                ║
+╚══════════════════════════════════════════════════════════════╝
+
+Based on the previous 2 experiments, I've observed that:
+- Tree-based models consistently outperform linear models on this dataset
+- Iteration 2's log-transform hypothesis improved RMSE by 80%
+- Feature distributions suggest boosting may capture residual patterns
+...
+```
+
+Notice how Gemini explicitly references **"the previous 2 experiments"** — this is only possible because the conversation history contains all prior results.
+
+---
+
+## How Each Component Uses History
+
+### ExperimentDesigner
+
+Location: `src/cognitive/experiment_designer.py:114`
+
+The designer receives:
+- Data profile (sent in every prompt)
+- **Last 5 experiment results** (summarized in JSON)
+- User constraints + top hypothesis from previous iteration
+
+But because of Thought Signatures, Gemini also has **implicit access** to:
+- All previous design decisions and reasoning
+- All previous analysis observations
+- All previous hypotheses
+
+This allows it to avoid repeating experiments and build on past learnings.
+
+### ResultsAnalyzer
+
+Location: `src/cognitive/results_analyzer.py:84`
+
+The analyzer receives:
+- Current experiment result
+- Metric comparison (local computation)
+- **Last 5 experiments** from history
+
+With Thought Signatures, it can also reference:
+- Observations from previous analyses
+- Patterns identified in earlier iterations
+- Hypotheses that were tested and their outcomes
+
+This enables **trend detection** ("improving", "plateau", "fluctuating") across the full session.
+
+### HypothesisGenerator
+
+Location: `src/cognitive/hypothesis_generator.py:79`
+
+The generator receives:
+- Current analysis result
+- **Last 5 experiments** from history
+- Current iteration number and constraints
+
+With conversation history, it can:
+- Remember which hypotheses have already been tested
+- Build on successful hypotheses from earlier iterations
+- Avoid suggesting approaches that failed previously
+- Develop **increasingly sophisticated** hypotheses over time
+
+<Tip>
+You'll often see hypotheses in iteration 10+ that reference specific findings from iterations 2-3. This is Thought Signatures in action.
+</Tip>
+
+---
+
+## Gemini 3 Configuration for Thought Signatures
+
+Location: `src/cognitive/gemini_client.py:88`
+
+Thought Signatures require specific Gemini 3 settings:
+
+### Temperature: 1.0 (Fixed)
+
+```python
+return genai.GenerationConfig(
+    temperature=self.config.temperature,  # Always 1.0
+)
+```
+
+Gemini 3's documentation specifies **temperature 1.0** is required for high-quality reasoning with Thought Signatures.
+
+### Thinking Level: High
+
+All three core components (Designer, Analyzer, Generator) use `thinking_level="high"`:
+
+```python
+response = self.client.generate_json(
+    prompt=prompt,
+    system_instruction=EXPERIMENT_DESIGNER_SYSTEM_PROMPT,
+    thinking_level="high",  # Maximum reasoning depth
+)
+```
+
+Only the ReportGenerator uses `thinking_level="medium"` since it's a final summary rather than iterative reasoning.
+
+---
+
+## Why Thought Signatures Matter
+
+### Without Thought Signatures (Stateless API Calls)
+
+Imagine if each component made **isolated** API calls:
+
+- **Iteration 5**: Designer suggests trying XGBoost
+- **Iteration 10**: Designer suggests trying XGBoost again (forgot it already failed)
+- **Iteration 15**: Analyzer notes tree models work well (but can't reference iteration 3's finding)
+- **Iteration 20**: Generator suggests linear models (ignoring all evidence they underperform)
+
+The agent would be **memoryless** and repetitive.
+
+### With Thought Signatures (Shared Conversation)
+
+- **Iteration 5**: Designer tries XGBoost with learning_rate=0.1 → fails with overfitting
+- **Iteration 10**: Designer tries XGBoost with **regularization** (remembers iteration 5)
+- **Iteration 15**: Analyzer says "Consistent with iteration 3's observation about tree models"
+- **Iteration 20**: Generator says "Based on 15 iterations, linear models underperform — focus on ensemble tuning"
+
+The agent exhibits **learning** and **coherent long-term reasoning**.
+
+---
+
+## Comparison to Traditional AutoML
+
+| Traditional AutoML (H2O, Auto-sklearn) | ML Experiment Autopilot (Thought Signatures) |
+|-----------------------------------------|-----------------------------------------------|
+| Each model trial is independent | Each iteration builds on all previous iterations |
+| No memory of why models failed | Gemini remembers failure reasons and adjusts |
+| Generic "model X trained" messages | Detailed reasoning referencing past results |
+| Random or grid search over hyperparams | Hypothesis-driven parameter selection |
+| No narrative report generation | Coherent report synthesizing 20+ iterations |
+
+<Info>
+Thought Signatures transform AutoML from **random search** to **guided exploration** with a memory of what's been tried and why.
+</Info>
+
+---
+
+## Practical Example: Iteration 1 vs Iteration 10
+
+### Iteration 1 Design Prompt
+
+```
+### Iteration: 1
+### Previous Experiments
+No previous experiments. This is the first iteration.
+```
+
+Gemini has no context, so it makes a simple choice:
+
+```json
+{
+  "experiment_name": "random_forest_baseline",
+  "hypothesis": "Try RandomForest as a robust baseline",
+  "model_type": "RandomForestRegressor",
+  "model_params": {"n_estimators": 100}
+}
+```
+
+### Iteration 10 Design Prompt
+
+```
+### Iteration: 10
+### Previous Experiments
+[... summaries of iterations 1-9 ...]
+```
+
+But Gemini **also has access to** 54 prior conversation messages (9 iterations × 6 messages). So it says:
+
+```json
+{
+  "experiment_name": "xgboost_tuned_regularization",
+  "hypothesis": "Based on iteration 3's finding that XGBoost overfits, try stronger regularization with alpha=0.5",
+  "model_type": "XGBRegressor",
+  "model_params": {
+    "n_estimators": 200,
+    "learning_rate": 0.05,
+    "reg_alpha": 0.5,  # NEW: addressing iteration 3's overfitting
+    "max_depth": 4      # Shallower than iteration 3's depth=6
+  },
+  "reasoning": "Iteration 3 showed promise with XGBoost but overfit. Iterations 5-7 confirmed tree models excel on this dataset. Now applying regularization to prevent overfitting while maintaining strong performance."
+}
+```
+
+Notice the **explicit references** to iterations 3, 5-7 — only possible with Thought Signatures.
+
+---
+
+## Limitations and Considerations
+
+### Context Window
+
+Gemini 3 has a large but **finite** context window. For very long sessions (50+ iterations), the conversation history could exceed the limit. Currently, the system does not implement context pruning.
+
+<Note>
+In practice, 20 iterations × 6 messages = 120 messages, which is well within Gemini 3's context limits. Each message is also relatively short (data profiles and results are summarized, not sent in full).
+</Note>
+
+### Token Cost
+
+Every API call sends the **full conversation history**, which increases token usage linearly with session length. This is acceptable for "The Marathon Agent" use case but could be expensive for 100+ iteration sessions.
+
+### No History for Report Generation
+
+The `ReportGenerator` intentionally uses `use_history=False` (src/cognitive/report_generator.py:158):
+
+```python
+response = self.client.generate(
+    prompt=prompt,
+    system_instruction=REPORT_GENERATOR_SYSTEM_PROMPT,
+    thinking_level="medium",
+    use_history=False,  # Fresh context for report
+)
+```
+
+Why? The report prompt contains a **complete summary** of all experiments. Including the conversation history would be redundant and waste tokens.
+
+---
+
+## Key Takeaways
+
+1. **Thought Signatures = Shared Conversation History**: All cognitive components use one `GeminiClient` instance
+2. **Multi-Turn Context**: Each API call includes all previous prompts and responses
+3. **Reasoning Continuity**: Gemini can reference iteration 1 when designing iteration 10
+4. **Temperature 1.0 + High Thinking**: Required for quality long-term reasoning
+5. **Visible in --verbose**: Watch the context grow ("Context: 12 turns")
+6. **The Marathon Agent**: This is why the system qualifies for the hackathon track
+
+<Tip>
+To see Thought Signatures in action, run with `--verbose` and watch how Gemini's reasoning in iteration 5+ explicitly references earlier iterations by number.
+</Tip>

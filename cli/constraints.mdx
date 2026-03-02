@@ -1,0 +1,359 @@
+---
+title: Constraints Files
+description: How to write constraint files to guide experiment behavior
+---
+
+Constraints files allow you to guide the autopilot's experimentation strategy using natural language. They are written in Markdown format and organized into sections that control different aspects of the ML workflow.
+
+## Overview
+
+Constraints files provide a way to:
+- Specify preferred metrics and evaluation criteria
+- Guide model selection and algorithm choices
+- Control preprocessing and feature engineering
+- Define termination conditions
+- Enforce business rules and requirements
+
+The autopilot uses Gemini to interpret your constraints and apply them throughout the experimentation process.
+
+## File Format
+
+Constraints are written in Markdown with section headers (##) defining different constraint categories. Each section contains bullet points describing specific constraints.
+
+```markdown
+# Experiment Constraints
+
+## Section Name
+- Constraint 1
+- Constraint 2
+```
+
+## Standard Sections
+
+While you can create custom sections, these standard sections are recognized by the autopilot:
+
+### Metrics
+
+Define which metrics to optimize and track:
+
+```markdown
+## Metrics
+- Primary metric: RMSE
+- Also track: MAE, R²
+- Optimize for: lowest RMSE
+```
+
+**Common metrics:**
+- **Regression:** RMSE, MAE, R², MAPE
+- **Classification:** Accuracy, F1, Precision, Recall, ROC-AUC
+
+### Models
+
+Specify model preferences and restrictions:
+
+```markdown
+## Models
+- Prefer tree-based models
+- Prefer boosting methods
+- Avoid neural networks (interpretability required)
+- Must use ensemble methods
+```
+
+**Common model families:**
+- Tree-based: Decision Trees, Random Forest, Extra Trees
+- Boosting: XGBoost, LightGBM, CatBoost, AdaBoost
+- Linear: Linear/Logistic Regression, Ridge, Lasso, ElasticNet
+- Neural networks: MLP, deep learning models
+- Other: SVM, KNN, Naive Bayes
+
+### Preprocessing
+
+Control data preprocessing and feature engineering:
+
+```markdown
+## Preprocessing
+- Log-transform the target variable
+- Use median imputation for missing values
+- Scale features using StandardScaler
+- Create polynomial features up to degree 2
+- Do not remove outliers
+```
+
+**Common preprocessing steps:**
+- **Scaling:** StandardScaler, MinMaxScaler, RobustScaler
+- **Imputation:** Mean, median, mode, forward-fill, KNN imputation
+- **Encoding:** One-hot, label encoding, target encoding
+- **Transformations:** Log, square root, box-cox
+- **Feature engineering:** Polynomial features, interactions, binning
+
+### Termination
+
+Define when experiments should stop:
+
+```markdown
+## Termination
+- Stop if no improvement for 3 iterations
+- Stop if RMSE < 0.1
+- Stop if validation score plateaus
+```
+
+### Features
+
+Constraints about feature selection and engineering:
+
+```markdown
+## Features
+- Must include: age, income, location
+- Exclude: customer_id, timestamp
+- Create interaction between age and income
+- Use feature selection to keep top 20 features
+```
+
+### Validation
+
+Specify validation strategy:
+
+```markdown
+## Validation
+- Use 5-fold cross-validation
+- Use time-based split (no shuffle)
+- Stratify by target variable
+- Hold out 20% for final test set
+```
+
+### Performance
+
+Resource and runtime constraints:
+
+```markdown
+## Performance
+- Training time per model < 5 minutes
+- Use max 8 CPU cores
+- Prioritize faster models
+```
+
+## Complete Example
+
+Here's a real constraints file from the sample data:
+
+```markdown
+# Experiment Constraints
+
+## Metrics
+- Primary metric: RMSE
+
+## Models
+- Prefer tree-based models
+- Prefer boosting methods
+
+## Preprocessing
+- Log-transform the target variable
+- Use median imputation for missing values
+
+## Termination
+- Stop if no improvement for 3 iterations
+```
+
+## Example Use Cases
+
+### Financial Modeling
+
+For a loan default prediction model:
+
+```markdown
+# Loan Default Prediction Constraints
+
+## Metrics
+- Primary metric: F1 score
+- Minimize false negatives (missing actual defaults)
+- Track precision and recall separately
+
+## Models
+- Must be interpretable (regulatory requirement)
+- Prefer: Logistic Regression, Decision Trees, or Rule-based models
+- Avoid: Neural networks, complex ensembles
+
+## Features
+- Must include: credit_score, income, debt_ratio
+- Exclude: race, gender (fairness requirements)
+- Create debt-to-income ratio feature
+
+## Validation
+- Use time-based split (no data leakage)
+- Test on most recent 6 months of data
+
+## Preprocessing
+- Impute missing values with median
+- Scale numerical features
+- Cap outliers at 99th percentile
+```
+
+### E-commerce Recommendations
+
+For predicting customer purchase amounts:
+
+```markdown
+# Purchase Amount Prediction Constraints
+
+## Metrics
+- Primary metric: MAPE (Mean Absolute Percentage Error)
+- Secondary: RMSE
+
+## Models
+- Prefer: XGBoost, LightGBM, CatBoost
+- Use ensemble of top 3 models for final predictions
+
+## Preprocessing
+- Log-transform target (purchase_amount)
+- One-hot encode categorical features
+- Create recency, frequency, monetary (RFM) features
+- Normalize all numeric features
+
+## Features
+- Must include: customer_lifetime_value, days_since_last_purchase
+- Create: average_order_value, purchase_frequency
+- Use feature importance to select top 30 features
+
+## Termination
+- Stop if MAPE < 15%
+- Stop if no improvement for 5 iterations
+
+## Performance
+- Training time per model < 10 minutes
+- Prioritize inference speed for real-time predictions
+```
+
+### Medical Diagnosis
+
+For disease prediction with strict accuracy requirements:
+
+```markdown
+# Disease Diagnosis Constraints
+
+## Metrics
+- Primary metric: ROC-AUC
+- Minimum recall: 0.95 (catch all positive cases)
+- Track sensitivity and specificity
+
+## Models
+- Prefer interpretable models (clinical review requirement)
+- Primary: Logistic Regression, Random Forest
+- Ensemble acceptable if individual models are interpretable
+
+## Preprocessing
+- Handle missing values with domain knowledge:
+  - Lab values: use reference range midpoint
+  - Demographics: use mode
+- Standardize all lab values to z-scores
+- No data augmentation (maintain clinical validity)
+
+## Features
+- Must include all biomarkers: hemoglobin, glucose, cholesterol
+- Feature engineering: create risk score combinations
+- Document feature importance for clinical interpretation
+
+## Validation
+- Stratified 5-fold cross-validation
+- Ensure balanced classes in each fold
+- Validate on external dataset from different hospital
+
+## Termination
+- Minimum 20 iterations (thorough exploration required)
+- Stop if ROC-AUC > 0.90 and recall > 0.95
+```
+
+## Usage
+
+Pass your constraints file using the `--constraints` (or `-c`) flag:
+
+```bash
+autopilot run \
+  --data train.csv \
+  --target price \
+  --task regression \
+  --constraints constraints.md
+```
+
+## How Constraints Are Applied
+
+The autopilot interprets constraints at different stages:
+
+1. **Experiment Planning** - Gemini reads constraints and creates an initial experiment plan
+2. **Model Selection** - Filters and prioritizes models based on preferences
+3. **Preprocessing** - Applies specified preprocessing steps
+4. **Evaluation** - Uses specified metrics and validation strategies
+5. **Iteration** - Checks termination conditions after each experiment
+6. **Reporting** - Highlights compliance with constraints in final report
+
+## Natural Language Flexibility
+
+Constraints are interpreted by Gemini, so you can write them in natural language:
+
+```markdown
+## Models
+- I need fast predictions, so avoid slow models like SVM
+- The model needs to be explainable to non-technical stakeholders
+- Tree-based models have worked well in the past for similar datasets
+```
+
+This is equivalent to:
+
+```markdown
+## Models
+- Prioritize fast inference time
+- Require interpretability
+- Prefer tree-based models
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Be Specific">
+    Vague constraints like "use good models" are less helpful than specific ones like "prefer XGBoost and LightGBM for tabular data".
+  </Accordion>
+  
+  <Accordion title="Explain Why">
+    Including reasoning helps Gemini make better decisions:
+    ```markdown
+    ## Models
+    - Avoid neural networks (need interpretability for regulatory compliance)
+    ```
+  </Accordion>
+  
+  <Accordion title="Prioritize Constraints">
+    Use language like "must", "prefer", "avoid" to indicate importance:
+    - **Must** = Hard requirement
+    - **Prefer** = Strong preference but flexible
+    - **Avoid** = Try to avoid but acceptable if needed
+  </Accordion>
+  
+  <Accordion title="Don't Over-Constrain">
+    Too many restrictions can limit the autopilot's ability to find good solutions. Start with a few key constraints and add more as needed.
+  </Accordion>
+  
+  <Accordion title="Test Without Constraints First">
+    Run one experiment without constraints to see the baseline, then add constraints to guide improvements.
+  </Accordion>
+</AccordionGroup>
+
+## Constraint Validation
+
+The autopilot will:
+- Parse and validate your constraints file
+- Warn about conflicting constraints
+- Show how constraints are being applied (use `--verbose`)
+- Report constraint compliance in the final results
+
+## Examples Directory
+
+For more examples, see the sample constraints in the repository:
+
+```bash
+data/sample/constraints.md
+```
+
+## See Also
+
+- [Run Command](/cli/run-command) - How to use constraints in commands
+- [Arguments Reference](/cli/arguments) - The `--constraints` argument
+- [Configuration](/installation) - Gemini API setup for constraint interpretation

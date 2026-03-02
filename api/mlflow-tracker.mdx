@@ -1,0 +1,445 @@
+---
+title: MLflow Tracking
+description: MLflow integration for experiment tracking and artifact logging
+---
+
+## Overview
+
+The `MLflowTracker` class provides MLflow integration for tracking experiments, logging metrics, parameters, and artifacts. It features graceful degradation if MLflow fails, ensuring experiments continue even without tracking.
+
+## Features
+
+- **Local MLflow tracking** - Stores data in local `mlruns/` directory
+- **Automatic experiment creation** - Creates MLflow experiments automatically
+- **Metric and parameter logging** - Tracks all experiment metadata
+- **Artifact storage** - Saves code, profiles, and visualizations
+- **Graceful degradation** - Continues if MLflow fails
+
+## Class Definition
+
+### MLflowTracker
+
+```python
+from src.persistence.mlflow_tracker import MLflowTracker
+
+tracker = MLflowTracker(
+    experiment_name="autopilot_housing_abc123",
+    tracking_uri="file:///path/to/mlruns"
+)
+```
+
+<ParamField path="experiment_name" type="str" required>
+  Name of the MLflow experiment. Typically formatted as:
+  `autopilot_{dataset_name}_{session_id}`
+</ParamField>
+
+<ParamField path="tracking_uri" type="Optional[str]">
+  MLflow tracking URI. Defaults to local `mlruns/` directory.
+  
+  **Examples:**
+  - `"file:///path/to/mlruns"` - Local file storage
+  - `"http://localhost:5000"` - Remote MLflow server
+  - `"databricks"` - Databricks workspace
+</ParamField>
+
+### Properties
+
+<ResponseField name="experiment_name" type="str">
+  MLflow experiment name
+</ResponseField>
+
+<ResponseField name="experiment_id" type="str">
+  MLflow experiment ID (auto-generated)
+</ResponseField>
+
+<ResponseField name="disabled" type="bool">
+  True if MLflow initialization failed
+</ResponseField>
+
+<ResponseField name="client" type="MlflowClient">
+  MLflow client instance for queries
+</ResponseField>
+
+## Methods
+
+### log_data_profile()
+
+Log dataset profile as experiment metadata.
+
+```python
+tracker.log_data_profile(profile)
+```
+
+<ParamField path="profile" type="DataProfile" required>
+  DataProfile from DataProfiler
+</ParamField>
+
+**Logs:**
+- **Parameters:** Dataset dimensions, feature counts, target info
+- **Metrics:** Total missing values
+- **Artifacts:** Full profile as `data_profile.json`
+
+**Example logged parameters:**
+```python
+{
+    "n_rows": 1000,
+    "n_columns": 15,
+    "n_numeric_features": 8,
+    "n_categorical_features": 6,
+    "target_column": "price",
+    "target_type": "numeric"
+}
+```
+
+### log_experiment()
+
+Log a single experiment run with all metadata.
+
+```python
+tracker.log_experiment(result)
+```
+
+<ParamField path="result" type="ExperimentResult" required>
+  ExperimentResult from ExperimentRunner
+</ParamField>
+
+**Logs:**
+- **Parameters:** Model type, hyperparameters, preprocessing config
+- **Metrics:** All performance metrics, execution time, success flag
+- **Tags:** Hypothesis (truncated to 250 chars), success status
+- **Artifacts:** 
+  - Generated Python code
+  - Reasoning text file
+  - Error message (if failed)
+
+**Example logged parameters:**
+```python
+{
+    "model_type": "RandomForestClassifier",
+    "iteration": 3,
+    "model_n_estimators": 200,
+    "model_max_depth": 10,
+    "model_min_samples_split": 5,
+    "preprocessing_missing": "median",
+    "preprocessing_scaling": "standard",
+    "preprocessing_encoding": "onehot"
+}
+```
+
+**Example logged metrics:**
+```python
+{
+    "accuracy": 0.87,
+    "f1": 0.85,
+    "precision": 0.86,
+    "recall": 0.84,
+    "execution_time": 45.3,
+    "success": 1
+}
+```
+
+### log_final_summary()
+
+Log final experiment summary after all iterations.
+
+```python
+tracker.log_final_summary(state)
+```
+
+<ParamField path="state" type="ExperimentState" required>
+  Final ExperimentState after all iterations
+</ParamField>
+
+**Logs:**
+- **Metrics:** Total iterations, successful experiments, total time, best metric
+- **Tags:** Best experiment name, termination reason, final phase
+- **Artifacts:** Complete state as `final_state.json`
+
+### log_visualizations()
+
+Log visualization plots as artifacts.
+
+```python
+tracker.log_visualizations(plot_paths)
+```
+
+<ParamField path="plot_paths" type="list[Path]" required>
+  List of paths to generated plot PNG files
+</ParamField>
+
+**Example:**
+```python
+plot_paths = [
+    Path("plots/metric_progression.png"),
+    Path("plots/model_comparison.png"),
+    Path("plots/improvement_over_baseline.png")
+]
+tracker.log_visualizations(plot_paths)
+```
+
+### get_best_run()
+
+Query for the best run based on a metric.
+
+```python
+best_run = tracker.get_best_run(
+    metric_name="rmse",
+    ascending=True
+)
+```
+
+<ParamField path="metric_name" type="str" required>
+  Name of the metric to optimize
+</ParamField>
+
+<ParamField path="ascending" type="bool">
+  Whether lower values are better. Default: True
+  
+  - `True` for RMSE, MAE, loss metrics
+  - `False` for accuracy, F1, R² metrics
+</ParamField>
+
+**Returns:** `Optional[dict]` with:
+- `run_id` (str) - MLflow run ID
+- `run_name` (str) - Run name
+- `metrics` (dict) - All metrics
+- `params` (dict) - All parameters
+
+**Example:**
+```python
+best = tracker.get_best_run("f1", ascending=False)
+if best:
+    print(f"Best F1: {best['metrics']['f1']:.4f}")
+    print(f"Model: {best['params']['model_type']}")
+```
+
+### get_all_runs()
+
+Retrieve all runs in the experiment.
+
+```python
+runs = tracker.get_all_runs()
+```
+
+**Returns:** `list[dict]` - List of run dictionaries, each with:
+- `run_id` (str)
+- `run_name` (str)
+- `metrics` (dict)
+- `params` (dict)
+- `status` (str) - "FINISHED", "RUNNING", "FAILED", etc.
+
+**Example:**
+```python
+runs = tracker.get_all_runs()
+for run in runs:
+    print(f"{run['run_name']}: {run['status']}")
+    if 'f1' in run['metrics']:
+        print(f"  F1: {run['metrics']['f1']:.4f}")
+```
+
+## Helper Functions
+
+### create_tracker()
+
+Create a tracker with standardized naming.
+
+```python
+from src.persistence.mlflow_tracker import create_tracker
+
+tracker = create_tracker(
+    session_id="abc123",
+    dataset_name="housing"
+)
+# Creates experiment named: "autopilot_housing_abc123"
+```
+
+<ParamField path="session_id" type="str" required>
+  Unique session identifier
+</ParamField>
+
+<ParamField path="dataset_name" type="str" required>
+  Name of the dataset being used
+</ParamField>
+
+## Complete Example
+
+```python
+from pathlib import Path
+from src.persistence.mlflow_tracker import create_tracker
+from src.execution.data_profiler import DataProfiler
+from src.execution.experiment_runner import ExperimentRunner
+from src.orchestration.state import ExperimentSpec, ExperimentState
+
+# Create tracker
+tracker = create_tracker(
+    session_id="abc123",
+    dataset_name="titanic"
+)
+
+# Log data profile
+profiler = DataProfiler(
+    data_path=Path("titanic.csv"),
+    target_column="survived",
+    task_type="classification"
+)
+profile = profiler.profile()
+tracker.log_data_profile(profile)
+
+# Run and log experiments
+runner = ExperimentRunner()
+for spec in experiment_specs:
+    # Generate and run experiment
+    script_path = generator.generate(spec, ...)
+    result = runner.run(script_path, spec, iteration=i)
+    
+    # Log to MLflow
+    tracker.log_experiment(result)
+    
+    if result.success:
+        print(f"✓ {result.experiment_name}: {result.metrics}")
+
+# Log final summary
+tracker.log_final_summary(state)
+
+# Log visualizations
+plot_paths = viz_generator.generate(state, output_dir)
+tracker.log_visualizations(plot_paths)
+
+# Query best result
+best_run = tracker.get_best_run("f1", ascending=False)
+print(f"Best F1: {best_run['metrics']['f1']:.4f}")
+print(f"Best model: {best_run['params']['model_type']}")
+```
+
+## Viewing Results in MLflow UI
+
+Start the MLflow UI to view tracked experiments:
+
+```bash
+mlflow ui --backend-store-uri ./mlruns
+```
+
+Then open http://localhost:5000 in your browser.
+
+**UI features:**
+- Compare experiments side-by-side
+- Visualize metric trends
+- Download artifacts (code, profiles, plots)
+- Search and filter runs
+- Export to CSV
+
+## Error Handling
+
+The tracker gracefully handles MLflow failures:
+
+```python
+tracker = MLflowTracker(experiment_name="test")
+
+if tracker.disabled:
+    print("MLflow tracking disabled due to initialization failure")
+    # Experiments continue without tracking
+else:
+    print(f"Tracking to: {tracker.tracking_uri}")
+    tracker.log_experiment(result)
+```
+
+<Info>
+  All logging methods fail silently with warnings if MLflow is disabled. Experiments continue uninterrupted.
+</Info>
+
+**Example warning:**
+```
+⚠ MLflow initialization failed, tracking disabled: No module named 'mlflow'
+```
+
+## Remote Tracking Server
+
+Connect to a remote MLflow server:
+
+```python
+tracker = MLflowTracker(
+    experiment_name="autopilot_housing_abc123",
+    tracking_uri="http://mlflow-server:5000"
+)
+```
+
+**Set environment variable:**
+```bash
+export MLFLOW_TRACKING_URI=http://mlflow-server:5000
+python main.py
+```
+
+## Artifact Organization
+
+Artifacts are organized per run:
+
+```
+mlruns/
+└── {experiment_id}/
+    ├── {run_id_1}/  # data_profile run
+    │   └── artifacts/
+    │       └── data_profile.json
+    ├── {run_id_2}/  # experiment 1
+    │   └── artifacts/
+    │       ├── experiment_1.py
+    │       └── reasoning.txt
+    ├── {run_id_3}/  # experiment 2
+    │   └── artifacts/
+    │       ├── experiment_2.py
+    │       └── reasoning.txt
+    └── {run_id_final}/  # final_summary
+        └── artifacts/
+            ├── final_state.json
+            ├── metric_progression.png
+            ├── model_comparison.png
+            └── improvement_over_baseline.png
+```
+
+## Querying Experiments
+
+### Search by metric threshold
+
+```python
+from mlflow.tracking import MlflowClient
+
+client = tracker.client
+runs = client.search_runs(
+    experiment_ids=[tracker.experiment_id],
+    filter_string="metrics.f1 > 0.85",
+    order_by=["metrics.f1 DESC"]
+)
+
+for run in runs:
+    print(f"{run.info.run_name}: F1={run.data.metrics['f1']:.4f}")
+```
+
+### Get parameter values
+
+```python
+runs = tracker.get_all_runs()
+for run in runs:
+    if run['params'].get('model_type') == 'RandomForestClassifier':
+        n_est = run['params'].get('model_n_estimators')
+        depth = run['params'].get('model_max_depth')
+        f1 = run['metrics'].get('f1')
+        print(f"RF(n={n_est}, depth={depth}): F1={f1:.4f}")
+```
+
+## Comparing with Baseline
+
+```python
+# Get baseline (first experiment)
+runs = tracker.get_all_runs()
+baseline = runs[-1]  # Oldest run
+baseline_f1 = baseline['metrics']['f1']
+
+# Compare all runs
+for run in runs[:-1]:
+    current_f1 = run['metrics']['f1']
+    improvement = (current_f1 - baseline_f1) / baseline_f1 * 100
+    print(f"{run['run_name']}: {improvement:+.1f}% vs baseline")
+```
+
+## Source Location
+
+`~/workspace/source/src/persistence/mlflow_tracker.py`

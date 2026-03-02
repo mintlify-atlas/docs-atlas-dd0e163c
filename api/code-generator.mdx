@@ -1,0 +1,297 @@
+---
+title: CodeGenerator API
+description: Generate Python experiment scripts from templates using Jinja2
+---
+
+## Overview
+
+The `CodeGenerator` class generates executable Python ML experiment scripts from Jinja2 templates. It supports multiple model types and automatically handles parameter formatting and code validation.
+
+## Class Definition
+
+### CodeGenerator
+
+```python
+from src.execution.code_generator import CodeGenerator
+from pathlib import Path
+
+generator = CodeGenerator(templates_dir=Path("templates/"))
+```
+
+<ParamField path="templates_dir" type="Optional[Path]">
+  Path to templates directory. Defaults to project's `templates/` folder
+</ParamField>
+
+## Methods
+
+### generate()
+
+Generate an experiment script from a specification.
+
+```python
+script_path = generator.generate(
+    spec=experiment_spec,
+    data_path=Path("data.csv"),
+    target_column="target",
+    task_type="classification",
+    output_dir=Path("experiments/")
+)
+```
+
+<ParamField path="spec" type="ExperimentSpec" required>
+  Experiment specification containing:
+  - `experiment_name`: Unique name for the experiment
+  - `hypothesis`: Hypothesis being tested
+  - `model_type`: sklearn model class name (e.g., "RandomForestClassifier")
+  - `model_params`: Dictionary of model hyperparameters
+  - `preprocessing`: PreprocessingConfig object
+  - `reasoning`: Explanation of experiment design
+</ParamField>
+
+<ParamField path="data_path" type="Path" required>
+  Path to the dataset file
+</ParamField>
+
+<ParamField path="target_column" type="str" required>
+  Name of the target column
+</ParamField>
+
+<ParamField path="task_type" type="str" required>
+  Type of ML task: `'classification'` or `'regression'`
+</ParamField>
+
+<ParamField path="output_dir" type="Optional[Path]">
+  Output directory for generated script. Defaults to project's `experiments/` folder
+</ParamField>
+
+**Returns:** `Path` - Path to the generated Python script
+
+**Raises:**
+- `CodeGenerationError` - If template not found, code has syntax errors, or file write fails
+
+### generate_baseline()
+
+Generate a baseline experiment script with default settings.
+
+```python
+script_path = generator.generate_baseline(
+    data_path=Path("data.csv"),
+    target_column="target",
+    task_type="regression",
+    output_dir=Path("experiments/")
+)
+```
+
+<ParamField path="data_path" type="Path" required>
+  Path to the dataset file
+</ParamField>
+
+<ParamField path="target_column" type="str" required>
+  Name of the target column
+</ParamField>
+
+<ParamField path="task_type" type="str" required>
+  Type of ML task: `'classification'` or `'regression'`
+</ParamField>
+
+<ParamField path="output_dir" type="Optional[Path]">
+  Output directory for generated script
+</ParamField>
+
+**Returns:** `Path` - Path to the generated baseline script
+
+**Baseline models:**
+- **Regression:** LinearRegression with standard scaling and median imputation
+- **Classification:** LogisticRegression with standard scaling and median imputation
+
+## Template Selection
+
+Templates are automatically selected based on model type:
+
+| Model Type Prefix | Template |
+|------------------|----------|
+| `XGB*` or `xgb*` | `xgboost_model.py.jinja` |
+| `LGBM*` or `lgb*` | `lightgbm_model.py.jinja` |
+| Regression task | `sklearn_regressor.py.jinja` |
+| Classification task | `sklearn_classifier.py.jinja` |
+
+## Parameter Handling
+
+The generator intelligently handles model parameters:
+
+<Info>
+  **Template-managed parameters** are automatically handled by templates and excluded from the parameter string:
+  - `random_state`, `n_jobs`, `verbose`, `max_iter`
+  - `probability`, `verbosity`, `nthread`, `num_threads`
+</Info>
+
+Custom parameters are formatted and injected into the template:
+
+```python
+# Example parameter formatting
+params = {
+    "n_estimators": 100,
+    "max_depth": 5,
+    "learning_rate": 0.1,
+    "criterion": "gini"
+}
+# Formatted as: "n_estimators=100, max_depth=5, learning_rate=0.1, criterion='gini', "
+```
+
+## Code Validation
+
+All generated code is validated using Python's AST parser:
+
+```python
+import ast
+ast.parse(generated_code)  # Raises SyntaxError if invalid
+```
+
+<Warning>
+  If generated code has syntax errors, `CodeGenerationError` is raised with the specific line number and error message.
+</Warning>
+
+## Template Context
+
+Templates receive the following context variables:
+
+<ResponseField name="experiment_name" type="str">
+  Unique experiment identifier
+</ResponseField>
+
+<ResponseField name="timestamp" type="str">
+  ISO format timestamp of generation
+</ResponseField>
+
+<ResponseField name="data_path" type="str">
+  Absolute path to the dataset
+</ResponseField>
+
+<ResponseField name="target_column" type="str">
+  Name of the target column
+</ResponseField>
+
+<ResponseField name="task_type" type="str">
+  'classification' or 'regression'
+</ResponseField>
+
+<ResponseField name="model_type" type="str">
+  sklearn model class name
+</ResponseField>
+
+<ResponseField name="model_params" type="dict">
+  Dictionary of model hyperparameters
+</ResponseField>
+
+<ResponseField name="model_params_str" type="str">
+  Formatted parameter string for template insertion
+</ResponseField>
+
+<ResponseField name="preprocessing" type="PreprocessingConfig">
+  Preprocessing configuration:
+  - `missing_values`: 'drop', 'mean', 'median', 'mode', 'constant'
+  - `scaling`: 'standard', 'minmax', 'none'
+  - `encoding`: 'onehot', 'ordinal'
+  - `target_transform`: 'log', 'none', or None
+</ResponseField>
+
+<ResponseField name="hypothesis" type="str">
+  Hypothesis being tested
+</ResponseField>
+
+<ResponseField name="reasoning" type="str">
+  Explanation of experiment design
+</ResponseField>
+
+## Complete Example
+
+```python
+from pathlib import Path
+from src.execution.code_generator import CodeGenerator
+from src.orchestration.state import ExperimentSpec, PreprocessingConfig
+
+# Create experiment specification
+spec = ExperimentSpec(
+    experiment_name="rf_tuned_depth",
+    hypothesis="Limiting tree depth will reduce overfitting",
+    model_type="RandomForestClassifier",
+    model_params={
+        "n_estimators": 200,
+        "max_depth": 10,
+        "min_samples_split": 5,
+        "class_weight": "balanced"
+    },
+    preprocessing=PreprocessingConfig(
+        missing_values="median",
+        scaling="standard",
+        encoding="onehot"
+    ),
+    reasoning="Previous experiment showed overfitting with unlimited depth"
+)
+
+# Initialize generator
+generator = CodeGenerator()
+
+# Generate script
+script_path = generator.generate(
+    spec=spec,
+    data_path=Path("data/titanic.csv"),
+    target_column="survived",
+    task_type="classification",
+    output_dir=Path("experiments/")
+)
+
+print(f"Generated script: {script_path}")
+# Output: Generated script: experiments/rf_tuned_depth.py
+```
+
+## Helper Functions
+
+### create_experiment_from_gemini_response()
+
+Convert Gemini's JSON response to an ExperimentSpec.
+
+```python
+from src.execution.code_generator import create_experiment_from_gemini_response
+
+gemini_response = {
+    "experiment_name": "xgboost_tuned",
+    "hypothesis": "XGBoost will handle non-linear patterns better",
+    "model_type": "XGBClassifier",
+    "model_params": {"max_depth": 6, "n_estimators": 100},
+    "preprocessing": {
+        "missing_values": "median",
+        "scaling": "standard",
+        "encoding": "onehot"
+    },
+    "reasoning": "Data shows complex interactions"
+}
+
+spec = create_experiment_from_gemini_response(gemini_response)
+```
+
+**Raises:**
+- `ValueError` - If response is missing required fields: `experiment_name`, `hypothesis`, `model_type`
+
+## Error Handling
+
+### CodeGenerationError
+
+Custom exception raised when code generation fails:
+
+```python
+try:
+    script_path = generator.generate(spec, data_path, target_column, task_type)
+except CodeGenerationError as e:
+    print(f"Code generation failed: {e}")
+```
+
+Common causes:
+- Template file not found
+- Invalid model parameters causing syntax errors
+- File system permission issues
+- Invalid preprocessing configuration
+
+## Source Location
+
+`~/workspace/source/src/execution/code_generator.py`

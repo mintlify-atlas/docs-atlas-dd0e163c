@@ -1,0 +1,310 @@
+---
+title: System Architecture
+description: Understanding the layered architecture of ML Experiment Autopilot
+---
+
+ML Experiment Autopilot uses a **four-layer architecture** to orchestrate autonomous ML experimentation. Each layer has a distinct responsibility, from high-level decision-making to low-level persistence.
+
+## Architectural Overview
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                   ML EXPERIMENT AUTOPILOT                   │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │                 ORCHESTRATION LAYER                    │ │
+│  │ ExperimentController — main loop & state machine       │ │
+│  │ Pydantic state management — JSON with type validation  │ │
+│  │ Termination criteria — plateau, budget, agent decision │ │
+│  └────────────────────────────────────────────────────────┘ │
+│                             │                               │
+│                             ▼                               │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │           COGNITIVE CORE  (Gemini 3 Flash)             │ │
+│  │                                                        │ │
+│  │  ExperimentDesigner — designs next experiment          │ │
+│  │  ResultsAnalyzer — compares results, detects trends    │ │
+│  │  HypothesisGenerator — hypotheses with confidence      │ │
+│  │  ReportGenerator — publication-ready narrative reports │ │
+│  │                                                        │ │
+│  │  Thought Signatures maintain reasoning continuity      │ │
+│  │  across all iterations via shared conversation history │ │
+│  └────────────────────────────────────────────────────────┘ │
+│                             │                               │
+│                             ▼                               │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │                 EXECUTION LAYER                        │ │
+│  │  DataProfiler — schema, stats, missing values          │ │
+│  │  CodeGenerator — Jinja2 template-based Python scripts  │ │
+│  │  ExperimentRunner — subprocess execution with timeout  │ │
+│  │  VisualizationGenerator — matplotlib charts            │ │
+│  └────────────────────────────────────────────────────────┘ │
+│                             │                               │
+│                             ▼                               │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │                  PERSISTENCE LAYER                     │ │
+│  │  MLflow tracking (local) — metrics, params, artifacts  │ │
+│  │  JSON state files — resumable experiment sessions      │ │
+│  │  Artifact storage — models, plots, generated code      │ │
+│  └────────────────────────────────────────────────────────┘ │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Layer 1: Orchestration Layer
+
+The orchestration layer is the **control center** of the system, managing the experiment lifecycle from start to finish.
+
+### ExperimentController
+
+Location: `src/orchestration/controller.py:46`
+
+The `ExperimentController` class implements the main experiment loop as a **state machine** with phases:
+
+1. **INITIALIZING** → **DATA_PROFILING**: Analyze dataset characteristics
+2. **DATA_PROFILING** → **BASELINE_MODELING**: Run simple baseline model
+3. **BASELINE_MODELING** → **EXPERIMENT_DESIGN**: Enter main iteration loop
+4. **EXPERIMENT_DESIGN** → **CODE_GENERATION** → **EXPERIMENT_EXECUTION** → **RESULTS_ANALYSIS** → **HYPOTHESIS_GENERATION** → back to **EXPERIMENT_DESIGN** (repeat)
+5. **COMPLETED** or **FAILED**: Finalize with report and visualizations
+
+<Note>
+The state machine design allows for **resumable sessions**. You can interrupt an experiment with `Ctrl+C` and resume from the saved state file using the `--resume` flag.
+</Note>
+
+### State Management with Pydantic
+
+Location: `src/orchestration/state.py`
+
+All experiment state is represented using **Pydantic models** for type safety and JSON serialization:
+
+- **ExperimentState**: Complete session state (src/orchestration/state.py:194)
+- **ExperimentConfig**: User configuration and constraints (src/orchestration/state.py:95)
+- **ExperimentResult**: Results from a single experiment (src/orchestration/state.py:70)
+- **DataProfile**: Dataset statistics and schema (src/orchestration/state.py:111)
+- **AnalysisResult**: Results analysis with trend detection (src/orchestration/state.py:152)
+- **HypothesisSet**: Generated hypotheses for next iteration (src/orchestration/state.py:177)
+
+State is automatically saved to `outputs/state_<session_id>.json` after each phase.
+
+### Termination Criteria
+
+The controller checks multiple termination conditions after each iteration (src/orchestration/state.py:251):
+
+| Criterion | Default | Configurable Via |
+|-----------|---------|------------------|
+| Max iterations | 20 | `--max-iterations` |
+| Time budget | 3600 seconds | `--time-budget` |
+| Performance plateau | 3 iterations without improvement | Constraints file |
+| Target metric achieved | None | Constraints file |
+| Agent recommendation | Enabled | Automatic |
+
+---
+
+## Layer 2: Cognitive Core (Gemini 3)
+
+The cognitive layer contains four specialized AI agents that make **all high-level decisions** using Gemini 3. All four components share a single `GeminiClient` instance to maintain [Thought Signatures](/concepts/thought-signatures).
+
+### Four Cognitive Components
+
+<CardGroup cols={2}>
+  <Card title="ExperimentDesigner" icon="flask">
+    **Location**: `src/cognitive/experiment_designer.py:83`
+    
+    Designs the next experiment based on:
+    - Data profile (schema, distributions, missing values)
+    - All previous experiment results
+    - User constraints from Markdown file
+    - Top hypothesis from previous iteration
+    
+    **Output**: `ExperimentSpec` with model type, hyperparameters, preprocessing config, and reasoning
+  </Card>
+  
+  <Card title="ResultsAnalyzer" icon="chart-line">
+    **Location**: `src/cognitive/results_analyzer.py:56`
+    
+    Analyzes experiment outcomes by:
+    - Comparing metrics against baseline, best, and previous
+    - Detecting trends (improving, degrading, plateau, fluctuating)
+    - Generating key observations
+    
+    **Output**: `AnalysisResult` with metric comparisons, trend pattern, and observations
+  </Card>
+  
+  <Card title="HypothesisGenerator" icon="lightbulb">
+    **Location**: `src/cognitive/hypothesis_generator.py:52`
+    
+    Generates 2-3 ranked hypotheses by:
+    - Synthesizing analysis results
+    - Balancing exploration vs exploitation
+    - Providing confidence scores (0-1)
+    - Suggesting concrete models and parameters
+    
+    **Output**: `HypothesisSet` with prioritized hypotheses
+  </Card>
+  
+  <Card title="ReportGenerator" icon="file-lines">
+    **Location**: `src/cognitive/report_generator.py:64`
+    
+    Creates publication-ready reports with:
+    - Executive summary
+    - Methodology description
+    - Results table and best model details
+    - Key insights and recommendations
+    
+    **Output**: Markdown report with embedded visualizations
+  </Card>
+</CardGroup>
+
+### Shared GeminiClient
+
+Location: `src/cognitive/gemini_client.py:52`
+
+All four components use the **same** `GeminiClient` instance initialized in the controller (src/orchestration/controller.py:109):
+
+```python
+self.gemini = GeminiClient()
+self.experiment_designer = ExperimentDesigner(self.gemini)
+self.results_analyzer = ResultsAnalyzer(self.gemini)
+self.hypothesis_generator = HypothesisGenerator(self.gemini)
+self.report_generator = ReportGenerator(self.gemini)
+```
+
+This sharing enables **true multi-turn reasoning** where Gemini can reference decisions from iteration 1 when designing iteration 10.
+
+<Info>
+The `GeminiClient` maintains a `conversation_history` list that grows across all iterations. When you run with `--verbose`, you'll see the context size displayed as "Context: X turns".
+</Info>
+
+---
+
+## Layer 3: Execution Layer
+
+The execution layer handles **code generation and experiment execution** without calling Gemini.
+
+### DataProfiler
+
+Location: `src/execution/data_profiler.py`
+
+Analyzes the dataset using pandas to extract:
+- Schema (column names, types)
+- Statistics (mean, std, min, max, quartiles)
+- Missing value counts and percentages
+- Target distribution (for regression: mean/std/skew, for classification: class counts)
+
+### CodeGenerator
+
+Location: `src/execution/code_generator.py`
+
+Generates executable Python scripts from `ExperimentSpec` using **Jinja2 templates**:
+
+```
+templates/
+├── base_experiment.py.jinja       # Common training/evaluation logic
+├── sklearn_classifier.py.jinja    # scikit-learn classifiers
+├── sklearn_regressor.py.jinja     # scikit-learn regressors
+├── xgboost_model.py.jinja         # XGBoost models
+└── lightgbm_model.py.jinja        # LightGBM models
+```
+
+All generated scripts are saved to `outputs/experiments/<session_id>/` and validated with `ast.parse()` before execution.
+
+### ExperimentRunner
+
+Location: `src/execution/experiment_runner.py`
+
+Executes generated Python scripts as **subprocesses** with:
+- Timeout protection (default: 600 seconds)
+- stdout/stderr capture
+- JSON output parsing (metrics, model path, errors)
+- Graceful failure handling (failed experiments don't stop the loop)
+
+### VisualizationGenerator
+
+Location: `src/execution/visualization_generator.py`
+
+Generates matplotlib charts:
+- **Metric progression**: Line chart showing primary metric across iterations
+- **Model comparison**: Horizontal bar chart comparing all models
+- **Improvement over baseline**: Bar chart showing % improvement
+
+All plots use the **Agg backend** (headless) and are saved to `outputs/plots/`.
+
+---
+
+## Layer 4: Persistence Layer
+
+The persistence layer handles **logging and artifact storage**.
+
+### MLflow Tracking
+
+Location: `src/persistence/mlflow_tracker.py`
+
+All experiments are logged to MLflow with:
+- **Metrics**: RMSE, MAE, R2 (regression) or Accuracy, F1, AUC (classification)
+- **Parameters**: Model hyperparameters, preprocessing config
+- **Tags**: Iteration number, hypothesis, model type
+- **Artifacts**: Generated code, saved models, visualizations
+
+View results with:
+```bash
+mlflow ui --backend-store-uri file:./outputs/mlruns
+```
+
+### JSON State Files
+
+Experiment state is saved to `outputs/state_<session_id>.json` after each phase for:
+- **Crash recovery**: Resume from last saved state
+- **Debugging**: Inspect exact state at any point
+- **Reproducibility**: Full record of all decisions and results
+
+### Artifact Storage
+
+All generated outputs are organized under `outputs/`:
+
+```
+outputs/
+├── experiments/<session_id>/  # Generated Python scripts
+├── reports/                   # Markdown reports
+├── plots/                     # PNG visualizations
+├── models/                    # Saved model files
+├── mlruns/                    # MLflow tracking data
+└── state_<session_id>.json   # Session state snapshots
+```
+
+---
+
+## Data Flow
+
+Here's how data flows through the system during a single iteration:
+
+1. **ExperimentController** calls **ExperimentDesigner** with data profile + history
+2. **ExperimentDesigner** calls Gemini → returns `ExperimentSpec` (JSON)
+3. **CodeGenerator** converts `ExperimentSpec` → Python script (Jinja2)
+4. **ExperimentRunner** executes script → captures `ExperimentResult` (JSON output)
+5. **ExperimentController** updates state, logs to MLflow
+6. **ResultsAnalyzer** calls Gemini with results → returns `AnalysisResult`
+7. **HypothesisGenerator** calls Gemini with analysis → returns `HypothesisSet`
+8. Loop repeats with top hypothesis fed back into **ExperimentDesigner**
+
+<Tip>
+Each iteration adds 4-6 messages to the shared Gemini conversation (design prompt + response, analysis prompt + response, hypothesis prompt + response). Over 20 iterations, this can reach 100+ messages, enabling Gemini to build deep contextual understanding.
+</Tip>
+
+---
+
+## Why This Architecture?
+
+This layered design provides:
+
+1. **Separation of concerns**: Cognitive decisions (Gemini) vs execution (templates + subprocess)
+2. **Testability**: Each component has 10-24 unit tests (160 total)
+3. **Resumability**: Pydantic state snapshots enable crash recovery
+4. **Observability**: MLflow + rich console output + JSON state files
+5. **Safety**: Subprocess isolation, timeout protection, graceful failure handling
+
+<Note>
+The architecture is designed for **The Marathon Agent** track — Gemini runs autonomously for hours, making 100+ API calls while maintaining reasoning continuity through Thought Signatures.
+</Note>

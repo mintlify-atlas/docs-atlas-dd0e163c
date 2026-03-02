@@ -1,0 +1,402 @@
+---
+title: ResultsAnalyzer
+description: Gemini-powered experiment results analysis with metric comparison and trend detection
+---
+
+## Overview
+
+The `ResultsAnalyzer` analyzes ML experiment outcomes using Gemini 3, comparing metrics against baselines and detecting performance patterns. It computes metric comparisons locally and uses Gemini to generate actionable insights.
+
+### Key Features
+
+- Compares metrics against baseline, best, and previous experiments
+- Detects performance trends (improving, degrading, plateau, fluctuating)
+- Handles lower-is-better vs higher-is-better metrics correctly
+- Generates key observations for informing next iterations
+- Maintains conversation context for Thought Signature continuity
+- Graceful fallback when Gemini is unavailable
+
+## Class Definition
+
+```python
+class ResultsAnalyzer:
+    """Analyzes ML experiment results using Gemini 3.
+
+    Key features:
+    - Compares metrics against baseline, best, and previous
+    - Detects performance trends (improving, degrading, plateau)
+    - Handles lower-is-better vs higher-is-better metrics correctly
+    - Generates key observations for next iteration
+    - Maintains conversation context for Thought Signature continuity
+    """
+
+    def __init__(self, gemini_client: GeminiClient):
+        """Initialize the results analyzer.
+
+        Args:
+            gemini_client: Shared GeminiClient instance for API calls.
+        """
+```
+
+## Constructor
+
+<ParamField path="gemini_client" type="GeminiClient" required>
+  Shared `GeminiClient` instance for API calls. Sharing the same client across cognitive components preserves conversation history.
+</ParamField>
+
+## Methods
+
+### analyze
+
+Analyze the results of a completed experiment.
+
+```python
+def analyze(
+    self,
+    current_result: ExperimentResult,
+    state: ExperimentState,
+) -> AnalysisResult:
+    """Analyze the results of a completed experiment.
+
+    Args:
+        current_result: The experiment result to analyze.
+        state: Current experiment state with history.
+
+    Returns:
+        AnalysisResult with comparisons and observations.
+    """
+```
+
+#### Parameters
+
+<ParamField path="current_result" type="ExperimentResult" required>
+  The experiment result to analyze, containing:
+  - `experiment_name` (str): Name of the experiment
+  - `iteration` (int): Iteration number
+  - `model_type` (str): Model class used
+  - `metrics` (dict): Dictionary of metric names to values
+  - `hypothesis` (str): Hypothesis being tested
+  - `success` (bool): Whether experiment completed successfully
+  - `error_message` (Optional[str]): Error details if failed
+</ParamField>
+
+<ParamField path="state" type="ExperimentState" required>
+  Current experiment state containing:
+  - `experiments` (list[ExperimentResult]): Historical results
+  - `config` (Config): Configuration including primary metric
+  - `best_metric` (Optional[float]): Best metric value so far
+  - `best_experiment` (Optional[str]): Name of best experiment
+</ParamField>
+
+#### Returns
+
+<ResponseField name="AnalysisResult" type="AnalysisResult">
+  Analysis result containing:
+  - `experiment_name` (str): Name of analyzed experiment
+  - `iteration` (int): Iteration number
+  - `success` (bool): Whether experiment succeeded
+  - `primary_metric` (Optional[MetricComparison]): Detailed metric comparison
+  - `trend_pattern` (TrendPattern): Detected performance trend
+  - `key_observations` (list[str]): Actionable insights (3-5 bullet points)
+  - `reasoning` (str): Detailed explanation of the analysis
+</ResponseField>
+
+### get_analysis_count
+
+Get the number of analyses performed.
+
+```python
+def get_analysis_count(self) -> int:
+    """Get the number of analyses performed."""
+```
+
+#### Returns
+
+<ResponseField name="count" type="int">
+  Total number of experiment results analyzed by this instance.
+</ResponseField>
+
+## Data Structures
+
+### MetricComparison
+
+Detailed comparison of the current metric value against historical benchmarks.
+
+```python
+@dataclass
+class MetricComparison:
+    metric_name: str
+    current_value: float
+    baseline_value: Optional[float]
+    best_value: Optional[float]
+    previous_value: Optional[float]
+    change_from_baseline_pct: Optional[float]
+    change_from_best_pct: Optional[float]
+    change_from_previous_pct: Optional[float]
+    is_improvement: bool
+    is_new_best: bool
+```
+
+**Fields:**
+
+<ResponseField name="metric_name" type="str">
+  Name of the primary metric being compared (e.g., "rmse", "f1").
+</ResponseField>
+
+<ResponseField name="current_value" type="float">
+  Current experiment's metric value.
+</ResponseField>
+
+<ResponseField name="baseline_value" type="Optional[float]">
+  Baseline metric value (typically from iteration 0).
+</ResponseField>
+
+<ResponseField name="best_value" type="Optional[float]">
+  Best metric value achieved so far across all experiments.
+</ResponseField>
+
+<ResponseField name="previous_value" type="Optional[float]">
+  Metric value from the previous iteration.
+</ResponseField>
+
+<ResponseField name="change_from_baseline_pct" type="Optional[float]">
+  Percentage change from baseline. Positive indicates improvement (accounting for metric direction).
+</ResponseField>
+
+<ResponseField name="change_from_best_pct" type="Optional[float]">
+  Percentage change from best. Positive indicates improvement over current best.
+</ResponseField>
+
+<ResponseField name="change_from_previous_pct" type="Optional[float]">
+  Percentage change from previous iteration. Positive indicates improvement.
+</ResponseField>
+
+<ResponseField name="is_improvement" type="bool">
+  Whether current result represents an improvement over best (considering improvement threshold).
+</ResponseField>
+
+<ResponseField name="is_new_best" type="bool">
+  Whether current result is the new best result.
+</ResponseField>
+
+### TrendPattern
+
+Enum representing detected performance trends across recent iterations.
+
+```python
+class TrendPattern(Enum):
+    INITIAL = "initial"          # Fewer than 3 experiments
+    IMPROVING = "improving"      # Consistent improvement over 2+ iterations
+    DEGRADING = "degrading"      # Consistent degradation over 2+ iterations
+    PLATEAU = "plateau"          # Less than 0.5% change for 2+ iterations
+    FLUCTUATING = "fluctuating"  # Alternating improvement/degradation
+```
+
+## Metric Direction Handling
+
+The analyzer correctly handles metrics where different directions indicate improvement:
+
+### Lower is Better
+- RMSE, MSE, MAE, log_loss, error
+
+### Higher is Better
+- accuracy, f1, r2, precision, recall, AUC
+
+Percentage changes are always calculated so that **positive values indicate improvement**, regardless of metric direction.
+
+## System Prompt
+
+The analyzer uses a comprehensive system prompt that guides Gemini to:
+
+- Compare results against baseline, best, and previous experiments
+- Identify meaningful improvements versus noise
+- Detect patterns across iterations
+- Consider both primary and secondary metrics
+- Note anomalies or unexpected results
+- Provide observations that inform next experiment design
+
+## Usage Examples
+
+### Basic Analysis
+
+```python
+from src.cognitive.gemini_client import GeminiClient
+from src.cognitive.results_analyzer import ResultsAnalyzer
+
+# Initialize
+client = GeminiClient()
+analyzer = ResultsAnalyzer(gemini_client=client)
+
+# Analyze latest result
+analysis = analyzer.analyze(
+    current_result=latest_result,
+    state=experiment_state
+)
+
+print(f"Success: {analysis.success}")
+print(f"Trend: {analysis.trend_pattern.value}")
+print(f"\nKey Observations:")
+for obs in analysis.key_observations:
+    print(f"  - {obs}")
+```
+
+### Detailed Metric Comparison
+
+```python
+analysis = analyzer.analyze(current_result, state)
+
+if analysis.primary_metric:
+    mc = analysis.primary_metric
+    print(f"Metric: {mc.metric_name}")
+    print(f"Current: {mc.current_value:.6f}")
+    print(f"Baseline: {mc.baseline_value:.6f}")
+    print(f"Best: {mc.best_value:.6f}")
+    print(f"")
+    print(f"Change from baseline: {mc.change_from_baseline_pct:+.2f}%")
+    print(f"Change from best: {mc.change_from_best_pct:+.2f}%")
+    print(f"Change from previous: {mc.change_from_previous_pct:+.2f}%")
+    print(f"")
+    print(f"Is improvement: {mc.is_improvement}")
+    print(f"Is new best: {mc.is_new_best}")
+```
+
+### Trend Detection
+
+```python
+analysis = analyzer.analyze(current_result, state)
+
+trend = analysis.trend_pattern
+
+if trend == TrendPattern.IMPROVING:
+    print("Performance is consistently improving!")
+elif trend == TrendPattern.PLATEAU:
+    print("Performance has plateaued - consider new approaches")
+elif trend == TrendPattern.DEGRADING:
+    print("Performance is degrading - revert to previous approach")
+elif trend == TrendPattern.FLUCTUATING:
+    print("Performance is unstable - need more consistent approach")
+else:
+    print("Too early to detect a trend")
+```
+
+### Handling Failed Experiments
+
+```python
+# Failed experiment
+failed_result = ExperimentResult(
+    experiment_name="test_xgboost",
+    iteration=3,
+    model_type="XGBRegressor",
+    metrics={},
+    success=False,
+    error_message="Memory error during training"
+)
+
+analysis = analyzer.analyze(failed_result, state)
+
+if not analysis.success:
+    print(f"Experiment failed: {analysis.key_observations[0]}")
+    print(f"Reasoning: {analysis.reasoning}")
+```
+
+### Integration in Experiment Loop
+
+```python
+from src.orchestration.state import ExperimentState
+
+# Initialize components
+client = GeminiClient()
+analyzer = ResultsAnalyzer(gemini_client=client)
+state = ExperimentState(config=config)
+
+# Execute and analyze experiments
+for iteration in range(1, 11):
+    # Execute experiment (returns ExperimentResult)
+    result = execute_experiment(spec)
+    
+    # Analyze results
+    analysis = analyzer.analyze(
+        current_result=result,
+        state=state
+    )
+    
+    # Log insights
+    print(f"\n=== Iteration {iteration} Analysis ===")
+    print(f"Trend: {analysis.trend_pattern.value}")
+    
+    if analysis.primary_metric and analysis.primary_metric.is_new_best:
+        print("NEW BEST RESULT!")
+    
+    print("\nObservations:")
+    for obs in analysis.key_observations:
+        print(f"  - {obs}")
+    
+    # Update state
+    state.add_experiment(result)
+    
+    # Use analysis for early stopping
+    if analysis.trend_pattern == TrendPattern.PLATEAU:
+        if state.iterations_without_improvement >= 3:
+            print("Stopping: Plateau detected for 3 iterations")
+            break
+
+print(f"\nTotal analyses: {analyzer.get_analysis_count()}")
+```
+
+### Custom Metric Comparison
+
+```python
+# Access the internal comparison method for custom metrics
+from src.cognitive.results_analyzer import ResultsAnalyzer
+
+analyzer = ResultsAnalyzer(client)
+
+# Compute comparison for a specific metric
+comparison = analyzer._compute_metric_comparison(
+    current_result=result,
+    state=state,
+    primary_metric="mae"  # Custom metric
+)
+
+if comparison:
+    print(f"MAE comparison: {comparison.change_from_baseline_pct:+.2f}%")
+```
+
+### Fallback Behavior
+
+```python
+# When Gemini fails, analyzer provides basic template-based analysis
+try:
+    analysis = analyzer.analyze(current_result, state)
+    
+    # Check if fallback was used
+    if "fallback" in analysis.reasoning.lower():
+        print("Using fallback analysis (Gemini unavailable)")
+        # Fallback still includes metric comparisons and trend detection
+        print(f"Trend: {analysis.trend_pattern.value}")
+        if analysis.primary_metric:
+            print(f"Change: {analysis.primary_metric.change_from_baseline_pct:+.2f}%")
+except Exception as e:
+    print(f"Analysis failed: {e}")
+```
+
+## Trend Detection Algorithm
+
+The analyzer uses the last 3 successful experiments to detect trends:
+
+1. **Extract recent metrics**: Get primary metric values from last 3 successful experiments
+2. **Calculate changes**: Compute percentage changes between consecutive iterations
+3. **Apply threshold**: Use `config.improvement_threshold` to determine significance
+4. **Classify pattern**:
+   - **IMPROVING**: All changes show improvement above threshold
+   - **DEGRADING**: All changes show degradation beyond threshold
+   - **PLATEAU**: All changes within threshold (near zero)
+   - **FLUCTUATING**: Mixed improvements and degradations
+   - **INITIAL**: Fewer than 3 experiments available
+
+## See Also
+
+- [GeminiClient](/api/gemini-client) - Underlying API client
+- [ExperimentDesigner](/api/experiment-designer) - Designs experiments based on analysis
+- [HypothesisGenerator](/api/hypothesis-generator) - Generates hypotheses from analysis
+- [ReportGenerator](/api/report-generator) - Creates reports from analyses

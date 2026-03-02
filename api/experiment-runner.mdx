@@ -1,0 +1,332 @@
+---
+title: ExperimentRunner API
+description: Execute generated experiment scripts in isolated subprocesses with timeout handling
+---
+
+## Overview
+
+The `ExperimentRunner` class executes generated ML experiment scripts in isolated subprocesses with comprehensive error handling, timeout management, and metrics parsing.
+
+## Features
+
+- **Subprocess isolation** - Each experiment runs in a separate Python process
+- **Timeout handling** - Automatic termination of long-running experiments
+- **Output capture** - Captures stdout/stderr for debugging
+- **JSON metrics parsing** - Parses structured experiment results
+- **Graceful error handling** - Returns structured error information on failure
+
+## Class Definition
+
+### ExperimentRunner
+
+```python
+from src.execution.experiment_runner import ExperimentRunner
+
+runner = ExperimentRunner(
+    timeout=300,
+    python_executable="python"
+)
+```
+
+<ParamField path="timeout" type="Optional[int]">
+  Timeout in seconds for each experiment. Defaults to system config value (typically 300s)
+</ParamField>
+
+<ParamField path="python_executable" type="str">
+  Path to Python executable. Defaults to `"python"`
+</ParamField>
+
+## Methods
+
+### run()
+
+Execute an experiment script and capture results.
+
+```python
+result = runner.run(
+    script_path=Path("experiments/rf_experiment.py"),
+    spec=experiment_spec,
+    iteration=1
+)
+```
+
+<ParamField path="script_path" type="Path" required>
+  Path to the generated Python experiment script
+</ParamField>
+
+<ParamField path="spec" type="ExperimentSpec" required>
+  Experiment specification used to create the script
+</ParamField>
+
+<ParamField path="iteration" type="int" required>
+  Current iteration number for tracking
+</ParamField>
+
+**Returns:** `ExperimentResult` - Pydantic model containing:
+
+<ResponseField name="experiment_name" type="str">
+  Name of the experiment from spec
+</ResponseField>
+
+<ResponseField name="iteration" type="int">
+  Iteration number
+</ResponseField>
+
+<ResponseField name="model_type" type="str">
+  Model class name (e.g., "RandomForestClassifier")
+</ResponseField>
+
+<ResponseField name="model_params" type="dict[str, Any]">
+  Hyperparameters used
+</ResponseField>
+
+<ResponseField name="preprocessing" type="PreprocessingConfig">
+  Preprocessing configuration applied
+</ResponseField>
+
+<ResponseField name="metrics" type="dict[str, float]">
+  Performance metrics from the experiment:
+  
+  **Classification:**
+  - `accuracy`, `precision`, `recall`, `f1`
+  - `roc_auc` (if applicable)
+  
+  **Regression:**
+  - `rmse`, `mae`, `r2`
+</ResponseField>
+
+<ResponseField name="hypothesis" type="str">
+  Hypothesis being tested
+</ResponseField>
+
+<ResponseField name="reasoning" type="str">
+  Reasoning behind experiment design
+</ResponseField>
+
+<ResponseField name="execution_time" type="float">
+  Wall clock time in seconds
+</ResponseField>
+
+<ResponseField name="success" type="bool">
+  Whether the experiment completed successfully
+</ResponseField>
+
+<ResponseField name="error_message" type="Optional[str]">
+  Error message if success=False
+</ResponseField>
+
+<ResponseField name="code_path" type="str">
+  Path to the executed script
+</ResponseField>
+
+<ResponseField name="timestamp" type="datetime">
+  When the experiment was run
+</ResponseField>
+
+### run_script_directly()
+
+Run a script and return raw output (primarily for testing).
+
+```python
+output = runner.run_script_directly(
+    script_path=Path("test_script.py")
+)
+```
+
+<ParamField path="script_path" type="Path" required>
+  Path to the Python script to execute
+</ParamField>
+
+**Returns:** `dict` with keys:
+- `stdout` (str) - Standard output
+- `stderr` (str) - Standard error
+- `returncode` (int) - Process exit code
+
+## Expected Script Output Format
+
+Generated experiment scripts must output JSON to stdout:
+
+```json
+{
+  "success": true,
+  "metrics": {
+    "accuracy": 0.87,
+    "f1": 0.85,
+    "precision": 0.86,
+    "recall": 0.84
+  }
+}
+```
+
+For errors:
+
+```json
+{
+  "success": false,
+  "error": "ValueError: Target column not found"
+}
+```
+
+## Error Handling
+
+The runner handles multiple failure modes gracefully:
+
+### 1. Script Exit Errors
+
+```python
+# Script exits with non-zero code
+result.success = False
+result.error_message = "Script exited with code 1: ImportError: No module named sklearn"
+```
+
+### 2. JSON Parsing Errors
+
+```python
+# Script outputs invalid JSON
+result.success = False
+result.error_message = "Failed to parse JSON output: Expecting value: line 1 column 1"
+```
+
+### 3. Timeout Errors
+
+```python
+# Script exceeds timeout
+result.success = False
+result.error_message = "Experiment timed out after 300 seconds"
+```
+
+### 4. Unexpected Exceptions
+
+```python
+# Any other exception
+result.success = False
+result.error_message = str(exception)
+```
+
+## Complete Example
+
+```python
+from pathlib import Path
+from src.execution.experiment_runner import ExperimentRunner
+from src.execution.code_generator import CodeGenerator
+from src.orchestration.state import ExperimentSpec, PreprocessingConfig
+
+# Create specification
+spec = ExperimentSpec(
+    experiment_name="logistic_baseline",
+    hypothesis="Establish baseline with logistic regression",
+    model_type="LogisticRegression",
+    model_params={"C": 1.0, "max_iter": 1000},
+    preprocessing=PreprocessingConfig(
+        missing_values="median",
+        scaling="standard",
+        encoding="onehot"
+    ),
+    reasoning="Starting with simple linear model"
+)
+
+# Generate script
+generator = CodeGenerator()
+script_path = generator.generate(
+    spec=spec,
+    data_path=Path("data.csv"),
+    target_column="target",
+    task_type="classification"
+)
+
+# Run experiment
+runner = ExperimentRunner(timeout=300)
+result = runner.run(
+    script_path=script_path,
+    spec=spec,
+    iteration=0
+)
+
+# Check results
+if result.success:
+    print(f"✓ Experiment succeeded in {result.execution_time:.2f}s")
+    print(f"Metrics: {result.metrics}")
+    
+    if "accuracy" in result.metrics:
+        print(f"Accuracy: {result.metrics['accuracy']:.4f}")
+else:
+    print(f"✗ Experiment failed: {result.error_message}")
+```
+
+## Timeout Configuration
+
+Default timeout from config:
+
+```python
+from src.config import ExperimentDefaults
+
+default_timeout = ExperimentDefaults().experiment_timeout  # Usually 300s
+```
+
+Custom timeout per runner:
+
+```python
+# Short timeout for quick models
+fast_runner = ExperimentRunner(timeout=60)
+
+# Longer timeout for complex models
+slow_runner = ExperimentRunner(timeout=1800)  # 30 minutes
+```
+
+## Process Isolation
+
+Each experiment runs in a clean subprocess:
+
+```python
+subprocess.run(
+    [python_executable, str(script_path)],
+    capture_output=True,
+    text=True,
+    timeout=timeout,
+    cwd=script_path.parent
+)
+```
+
+<Info>
+  Working directory is set to the script's parent directory, so relative paths in the script work correctly.
+</Info>
+
+## Metrics Access
+
+Access metrics from results:
+
+```python
+# Get specific metric
+accuracy = result.get_primary_metric("accuracy")
+
+# Iterate all metrics
+for metric_name, value in result.metrics.items():
+    print(f"{metric_name}: {value:.4f}")
+
+# Check if metric exists
+if "roc_auc" in result.metrics:
+    auc = result.metrics["roc_auc"]
+```
+
+## Error Types
+
+### ExperimentExecutionError
+
+Raised for unrecoverable execution errors:
+
+```python
+from src.execution.experiment_runner import ExperimentExecutionError
+
+try:
+    result = runner.run(script_path, spec, iteration)
+except ExperimentExecutionError as e:
+    print(f"Fatal execution error: {e}")
+```
+
+<Note>
+  Most errors are captured gracefully in `ExperimentResult.error_message` rather than raising exceptions.
+</Note>
+
+## Source Location
+
+`~/workspace/source/src/execution/experiment_runner.py`

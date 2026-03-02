@@ -1,0 +1,570 @@
+---
+title: 'Advanced Constraints'
+description: 'Advanced constraint examples for fine-grained control'
+---
+
+Constraints are natural language instructions that guide Gemini's experiment design. This guide shows advanced patterns for complex scenarios.
+
+## Constraint File Structure
+
+Constraints are written in Markdown with specific section headers:
+
+```markdown
+# Experiment Constraints
+
+## Metrics
+[Metric preferences and thresholds]
+
+## Models
+[Model family preferences and exclusions]
+
+## Preprocessing
+[Feature engineering and transformation rules]
+
+## Hyperparameters
+[Specific hyperparameter preferences]
+
+## Class Imbalance
+[Strategies for handling imbalanced data]
+
+## Feature Engineering
+[Custom feature creation rules]
+
+## Termination
+[Custom stopping criteria]
+
+## Domain Knowledge
+[Business rules and domain-specific guidance]
+```
+
+## Metrics Configuration
+
+<Tabs>
+  <Tab title="Multiple Metrics">
+    ```markdown
+    ## Metrics
+    - Primary metric: F1-score
+    - Secondary metric: ROC-AUC
+    - Monitor precision (should be > 0.60)
+    - Monitor recall (should be > 0.40)
+    - Report confusion matrix for each iteration
+    ```
+  </Tab>
+  <Tab title="Custom Thresholds">
+    ```markdown
+    ## Metrics
+    - Primary metric: RMSE
+    - Target: RMSE < 0.15
+    - Report MAE and R² as secondary metrics
+    - Stop if RMSE < 0.12 achieved
+    ```
+  </Tab>
+  <Tab title="Business Metrics">
+    ```markdown
+    ## Metrics
+    - Primary metric: ROI (defined as TP × $500 - FP × $50)
+    - Minimize false negatives (cost: $1000 each)
+    - Precision must be > 0.70 (compliance requirement)
+    - Report cost-weighted accuracy
+    ```
+  </Tab>
+</Tabs>
+
+## Model Selection
+
+<Tabs>
+  <Tab title="Prefer Specific Models">
+    ```markdown
+    ## Models
+    - Prefer gradient boosting models (XGBoost, LightGBM)
+    - Avoid neural networks (interpretability required)
+    - Test CatBoost for categorical features
+    - Prioritize models with feature importance
+    ```
+  </Tab>
+  <Tab title="Exclude Models">
+    ```markdown
+    ## Models
+    - Do not use SVM (dataset too large)
+    - Do not use k-NN (scalability concerns)
+    - Exclude deep learning models (no GPU available)
+    - Focus on tree-based ensembles
+    ```
+  </Tab>
+  <Tab title="Ensemble Strategy">
+    ```markdown
+    ## Models
+    - Test individual models first (iterations 1-3)
+    - Create ensemble in iterations 4-5
+    - Try voting classifier with top 3 models
+    - Consider stacking with meta-learner
+    ```
+  </Tab>
+</Tabs>
+
+## Preprocessing Strategies
+
+<Tabs>
+  <Tab title="Target Transformation">
+    ```markdown
+    ## Preprocessing
+    - Log-transform the target variable (highly skewed)
+    - Apply Box-Cox transformation if log fails
+    - Keep original target for interpretability
+    - Document transformation in final report
+    ```
+  </Tab>
+  <Tab title="Feature Engineering">
+    ```markdown
+    ## Preprocessing
+    - Create polynomial features for numeric variables (degree 2)
+    - Create interaction terms between age and balance
+    - Bin continuous variables into quartiles
+    - One-hot encode categorical variables
+    - Drop high-cardinality features (>50 unique values)
+    ```
+  </Tab>
+  <Tab title="Missing Values">
+    ```markdown
+    ## Preprocessing
+    - Use median imputation for numerical features
+    - Use mode imputation for categorical features
+    - Create "is_missing" indicator features
+    - For critical features, consider dropping rows with missing values
+    - Document missingness patterns in report
+    ```
+  </Tab>
+  <Tab title="Outlier Handling">
+    ```markdown
+    ## Preprocessing
+    - Detect outliers using IQR method (1.5 × IQR)
+    - Cap outliers at 95th/5th percentiles (winsorization)
+    - Do not remove outliers (may be legitimate)
+    - Apply robust scaling for sensitive models
+    ```
+  </Tab>
+</Tabs>
+
+## Hyperparameter Preferences
+
+<Tabs>
+  <Tab title="Random Forest">
+    ```markdown
+    ## Hyperparameters
+    - Random Forest: n_estimators in [100, 200, 300]
+    - Random Forest: max_depth in [10, 20, 30, None]
+    - Random Forest: min_samples_split in [2, 5, 10]
+    - Random Forest: class_weight='balanced'
+    ```
+  </Tab>
+  <Tab title="XGBoost">
+    ```markdown
+    ## Hyperparameters
+    - XGBoost: learning_rate in [0.01, 0.05, 0.1]
+    - XGBoost: max_depth in [3, 5, 7]
+    - XGBoost: n_estimators in [100, 200, 500]
+    - XGBoost: subsample in [0.8, 0.9, 1.0]
+    - XGBoost: scale_pos_weight = 6.3 (class imbalance ratio)
+    - XGBoost: early_stopping_rounds = 10
+    ```
+  </Tab>
+  <Tab title="Conservative Tuning">
+    ```markdown
+    ## Hyperparameters
+    - Start with default parameters in iteration 1
+    - Tune only learning rate in iteration 2
+    - Tune tree depth in iteration 3
+    - Combine best settings in iteration 4
+    - Fine-tune regularization in iteration 5
+    ```
+  </Tab>
+</Tabs>
+
+## Class Imbalance Strategies
+
+<Tabs>
+  <Tab title="Comprehensive">
+    ```markdown
+    ## Class Imbalance
+    - Class ratio: 86% negative, 14% positive (6.3:1)
+    - Strategy 1: Use class_weight='balanced' (iteration 1-2)
+    - Strategy 2: Apply SMOTE oversampling (iteration 3)
+    - Strategy 3: Use scale_pos_weight for XGBoost (iteration 4)
+    - Strategy 4: Threshold optimization (iteration 5)
+    - Prioritize recall > 0.40 for positive class
+    - Accept precision tradeoff
+    ```
+  </Tab>
+  <Tab title="SMOTE Focus">
+    ```markdown
+    ## Class Imbalance
+    - Apply SMOTE to balance classes to 1:1 ratio
+    - Use stratified k-fold cross-validation
+    - Apply SMOTE only on training fold (avoid data leakage)
+    - Compare with and without SMOTE
+    - Monitor for overfitting on minority class
+    ```
+  </Tab>
+  <Tab title="Cost-Sensitive">
+    ```markdown
+    ## Class Imbalance
+    - False Negative cost: $1000
+    - False Positive cost: $50
+    - Cost ratio: 20:1
+    - Use custom class weights: {0: 1, 1: 20}
+    - Optimize for cost-weighted accuracy
+    - Report expected cost per prediction
+    ```
+  </Tab>
+</Tabs>
+
+## Termination Criteria
+
+<Tabs>
+  <Tab title="Performance-Based">
+    ```markdown
+    ## Termination
+    - Stop if RMSE < 0.12 achieved
+    - Stop if no improvement for 3 consecutive iterations
+    - Stop if improvement < 1% for 2 iterations
+    - Maximum 10 iterations regardless
+    ```
+  </Tab>
+  <Tab title="Time-Based">
+    ```markdown
+    ## Termination
+    - Maximum time budget: 2 hours
+    - Stop if single iteration takes > 30 minutes
+    - Prioritize quick experiments in early iterations
+    - Allow longer training for final iterations
+    ```
+  </Tab>
+  <Tab title="Adaptive">
+    ```markdown
+    ## Termination
+    - Stop if Gemini recommends (high confidence > 0.8)
+    - Continue if trend is improving (even if small gains)
+    - Stop if performance degrades for 2 iterations
+    - Require at least 5 iterations before early stopping
+    ```
+  </Tab>
+</Tabs>
+
+## Domain Knowledge Integration
+
+<Tabs>
+  <Tab title="Feature Constraints">
+    ```markdown
+    ## Domain Knowledge
+    - "duration" feature is NOT available at prediction time
+    - Exclude "duration" from all models
+    - "pdays" = -1 means customer was not contacted
+    - Consider creating "was_previously_contacted" binary feature
+    - "month" and "day" may have seasonal patterns
+    ```
+  </Tab>
+  <Tab title="Business Rules">
+    ```markdown
+    ## Domain Knowledge
+    - Customers with default='yes' are high risk (filter or flag)
+    - Balance < 0 indicates overdraft (important predictor)
+    - Age groups: young (<30), middle (30-60), senior (>60)
+    - Previous campaign success (poutcome='success') is strong signal
+    - Contact type preference: cellular > telephone > unknown
+    ```
+  </Tab>
+  <Tab title="Interpretability">
+    ```markdown
+    ## Domain Knowledge
+    - Model must be interpretable for regulatory compliance
+    - Prefer tree-based models (can visualize decision rules)
+    - Generate feature importance plot
+    - Explain predictions for top 10 positive predictions
+    - Document decision boundaries in report
+    - Avoid black-box models (neural networks, deep ensembles)
+    ```
+  </Tab>
+</Tabs>
+
+## Complete Example: Production-Ready Constraints
+
+<Tabs>
+  <Tab title="E-commerce Churn">
+    ```markdown
+    # E-commerce Churn Prediction Constraints
+
+    ## Metrics
+    - Primary metric: F1-score (balance precision and recall)
+    - Target F1-score: > 0.55
+    - Monitor ROC-AUC (should be > 0.75)
+    - False Negative cost: $200 (lost customer LTV)
+    - False Positive cost: $10 (retention campaign cost)
+
+    ## Models
+    - Prefer interpretable models (regulatory requirement)
+    - Test: Logistic Regression, Random Forest, XGBoost
+    - Avoid: Neural networks, SVM
+    - Generate SHAP values for top model
+
+    ## Preprocessing
+    - Log-transform monetary features (purchase_amount, cart_value)
+    - One-hot encode categorical (country, device_type)
+    - Create recency-frequency-monetary (RFM) features
+    - Scale numerical features with StandardScaler
+
+    ## Feature Engineering
+    - Create "days_since_last_purchase" feature
+    - Create "purchase_frequency" (purchases / days_active)
+    - Create "avg_order_value" (total_spent / num_purchases)
+    - Interaction: age × total_spent
+    - Bin tenure into quartiles
+
+    ## Class Imbalance
+    - Churn rate: 23% (imbalanced)
+    - Use class_weight='balanced'
+    - Apply SMOTE if F1-score < 0.45 after iteration 2
+    - Optimize threshold for maximum F1-score
+
+    ## Hyperparameters
+    - XGBoost: learning_rate in [0.05, 0.1]
+    - XGBoost: max_depth in [3, 5, 7]
+    - XGBoost: n_estimators in [100, 200]
+    - Random Forest: n_estimators in [100, 200]
+    - Random Forest: max_depth in [10, 20, None]
+
+    ## Validation
+    - Use stratified 5-fold cross-validation
+    - Report mean ± std for all metrics
+    - Hold out 20% for final test set
+    - Ensure no data leakage from temporal features
+
+    ## Termination
+    - Stop if F1-score > 0.55 achieved
+    - Stop if no improvement for 3 iterations
+    - Maximum 8 iterations
+    - Time budget: 90 minutes
+
+    ## Domain Knowledge
+    - Customers with purchase_count = 1 are high churn risk
+    - Abandoned cart (cart_value > 0, purchase = 0) is strong signal
+    - Seasonality matters: Q4 has higher retention
+    - Mobile users have different behavior than desktop
+
+    ## Deliverables
+    - Feature importance plot
+    - SHAP summary plot for top model
+    - Threshold optimization curve
+    - Segment analysis (high-value vs low-value customers)
+    - Deployment-ready model artifact
+    ```
+  </Tab>
+  <Tab title="Medical Diagnosis">
+    ```markdown
+    # Medical Diagnosis Constraints
+
+    ## Metrics
+    - Primary metric: Recall (minimize false negatives)
+    - Target recall: > 0.90 (critical for patient safety)
+    - Monitor precision (should be > 0.50)
+    - Report sensitivity and specificity
+    - Generate ROC curve and precision-recall curve
+
+    ## Models
+    - Prefer ensemble methods for robustness
+    - Test: Random Forest, XGBoost, LightGBM
+    - Create voting ensemble of top 3 models
+    - Require 95% confidence intervals on metrics
+
+    ## Preprocessing
+    - Standardize lab values by age and gender norms
+    - Impute missing values with domain-appropriate methods
+    - Flag abnormal lab values as separate features
+    - Do NOT remove outliers (may be critical symptoms)
+
+    ## Feature Engineering
+    - Create "risk_score" from known clinical indicators
+    - Interaction between age and comorbidities
+    - Trend features from temporal measurements
+    - Domain-guided feature combinations
+
+    ## Class Imbalance
+    - Disease prevalence: 8% (highly imbalanced)
+    - Prioritize recall over precision
+    - Use scale_pos_weight = 11.5 for XGBoost
+    - Lower decision threshold to 0.3
+    - Accept higher false positive rate
+
+    ## Validation
+    - Stratified 10-fold cross-validation
+    - Report confidence intervals
+    - Test on holdout set from different hospital
+    - Ensure no patient leakage across folds
+
+    ## Termination
+    - Stop if recall > 0.90 and precision > 0.50
+    - Minimum 5 iterations required
+    - Maximum 12 iterations
+    - Do NOT stop early (patient safety critical)
+
+    ## Domain Knowledge
+    - Certain biomarkers are diagnostic (incorporate as rules)
+    - Age and gender affect normal ranges
+    - Symptoms have temporal ordering (use sequence)
+    - Missing lab values may indicate urgency
+    - Explain all predictions for clinical review
+
+    ## Compliance
+    - Model must be interpretable (HIPAA requirement)
+    - Document all preprocessing steps
+    - Version control all data and models
+    - Generate audit trail for predictions
+    - No black-box models allowed
+    ```
+  </Tab>
+  <Tab title="Fraud Detection">
+    ```markdown
+    # Credit Card Fraud Detection Constraints
+
+    ## Metrics
+    - Primary metric: Precision (minimize false alarms)
+    - Target precision: > 0.80
+    - Secondary: Recall (should be > 0.60)
+    - Report ROC-AUC and PR-AUC
+    - Cost metric: $100 per FP, $5000 per FN
+
+    ## Models
+    - Prefer fast models (real-time scoring required)
+    - Test: Logistic Regression, LightGBM, XGBoost
+    - Avoid: Random Forest (too slow for inference)
+    - Inference latency: < 100ms per prediction
+
+    ## Preprocessing
+    - Normalize transaction amounts by user history
+    - Encode categorical (merchant_category, location)
+    - Create velocity features (transactions per hour)
+    - Flag unusual patterns (time, location, amount)
+
+    ## Feature Engineering
+    - Amount deviation from user's average
+    - Time since last transaction
+    - Geographic distance from last transaction
+    - Merchant category frequency for user
+    - Day of week and time of day patterns
+
+    ## Class Imbalance
+    - Fraud rate: 0.17% (extreme imbalance)
+    - Use scale_pos_weight = 588 for XGBoost
+    - Apply ensemble of undersampling strategies
+    - Optimize threshold for cost minimization
+    - Accept recall tradeoff for high precision
+
+    ## Hyperparameters
+    - LightGBM: learning_rate = 0.05 (stability)
+    - LightGBM: max_depth = 5 (prevent overfitting)
+    - LightGBM: num_leaves = 31
+    - XGBoost: early_stopping_rounds = 20
+
+    ## Validation
+    - Time-based split (train on past, test on future)
+    - Do NOT use random split (data leakage)
+    - Test on most recent 2 weeks of data
+    - Monitor performance degradation over time
+
+    ## Termination
+    - Stop if precision > 0.80 and recall > 0.60
+    - Stop if cost < $500 per 1000 transactions
+    - Minimum 6 iterations
+    - Maximum 15 iterations
+
+    ## Domain Knowledge
+    - Transactions > $1000 are higher risk
+    - International transactions have higher fraud rate
+    - Consecutive transactions in different countries = fraud
+    - Unusual merchant categories for user = suspicious
+    - Time patterns: 2-5am has higher fraud rate
+
+    ## Production Requirements
+    - Model size: < 50MB (memory constraint)
+    - Inference time: < 100ms
+    - Export to ONNX format
+    - A/B testing framework ready
+    - Monitoring for model drift
+    ```
+  </Tab>
+</Tabs>
+
+## Running with Advanced Constraints
+
+```bash
+python -m src.main run \
+  --data data/custom/churn_data.csv \
+  --target churn \
+  --task classification \
+  --constraints constraints/production_churn.md \
+  --max-iterations 8 \
+  --time-budget 5400 \
+  --verbose
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Start Simple, Then Refine">
+    Begin with basic constraints and add complexity:
+    1. First run: No constraints (baseline)
+    2. Second run: Add metric and model preferences
+    3. Third run: Add preprocessing and termination rules
+    4. Fourth run: Add domain knowledge and advanced features
+  </Accordion>
+  <Accordion title="Be Specific but Flexible">
+    - ✅ "Prefer tree-based models" (flexible)
+    - ❌ "Use Random Forest with exactly 100 trees" (too rigid)
+    - ✅ "RMSE should be < 0.15" (clear target)
+    - ❌ "Make the model better" (too vague)
+  </Accordion>
+  <Accordion title="Document Domain Knowledge">
+    Gemini benefits from understanding:
+    - Feature meanings and relationships
+    - Business constraints and requirements
+    - Known patterns or anomalies in data
+    - Regulatory or compliance requirements
+    - Cost implications of errors
+  </Accordion>
+  <Accordion title="Use Natural Language">
+    Write constraints as if explaining to a data scientist:
+    - "Log-transform the target because it's skewed"
+    - "Avoid SVM because the dataset is too large"
+    - "Prioritize recall because false negatives are costly"
+    - "Stop early if we hit 90% recall"
+  </Accordion>
+</AccordionGroup>
+
+## Constraint Validation
+
+The autopilot validates constraints during execution:
+
+```
+✓ Constraints loaded successfully
+✓ Primary metric: F1-score
+✓ Model preferences: XGBoost, LightGBM, Random Forest
+✓ Preprocessing: log-transform target, standardize features
+✓ Termination: F1 > 0.55 OR no improvement for 3 iterations
+⚠ Warning: scale_pos_weight=6.3 may be too aggressive
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Regression Example" icon="chart-line" href="/examples/regression">
+    See constraints in action for regression
+  </Card>
+  <Card title="Classification Example" icon="binary" href="/examples/classification">
+    See constraints for classification tasks
+  </Card>
+  <Card title="CLI Reference" icon="terminal" href="/cli/run-command">
+    All command-line options
+  </Card>
+  <Card title="Concepts" icon="lightbulb" href="/concepts/thought-signatures">
+    How Gemini interprets constraints
+  </Card>
+</CardGroup>

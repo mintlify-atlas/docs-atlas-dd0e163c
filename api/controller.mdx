@@ -1,0 +1,427 @@
+---
+title: ExperimentController API
+description: Main orchestration controller for the ML experiment autopilot loop
+---
+
+## Overview
+
+The `ExperimentController` is the central orchestrator that manages the complete ML experiment lifecycle. It coordinates data profiling, baseline modeling, iterative experiment design, code generation, execution, analysis, and reporting.
+
+## Architecture
+
+The controller implements a multi-phase state machine:
+
+1. **Data Profiling** - Analyze dataset characteristics
+2. **Baseline Modeling** - Establish performance baseline
+3. **Experiment Loop** - Iterative design, execute, analyze
+4. **Finalization** - Generate report and visualizations
+
+## Class Definition
+
+### ExperimentController
+
+```python
+from src.orchestration.controller import ExperimentController
+from pathlib import Path
+
+controller = ExperimentController(
+    data_path=Path("housing.csv"),
+    target_column="price",
+    task_type="regression",
+    constraints="Focus on interpretable models",
+    max_iterations=20,
+    time_budget=3600,
+    output_dir=Path("outputs/"),
+    verbose=True,
+    resume_path=None
+)
+```
+
+<ParamField path="data_path" type="Path" required>
+  Path to the dataset file (CSV or Parquet)
+</ParamField>
+
+<ParamField path="target_column" type="str" required>
+  Name of the target column for prediction
+</ParamField>
+
+<ParamField path="task_type" type="str" required>
+  Type of ML task: `'classification'` or `'regression'`
+</ParamField>
+
+<ParamField path="constraints" type="Optional[str]">
+  Natural language constraints for the AI:
+  - "Only use tree-based models"
+  - "Prioritize interpretability over accuracy"
+  - "Must achieve R² > 0.85"
+  - "Avoid deep learning methods"
+</ParamField>
+
+<ParamField path="max_iterations" type="int">
+  Maximum number of experiment iterations. Default: 20
+</ParamField>
+
+<ParamField path="time_budget" type="int">
+  Time budget in seconds. Default: 3600 (1 hour)
+</ParamField>
+
+<ParamField path="output_dir" type="Optional[Path]">
+  Output directory for results. Defaults to project `outputs/` folder
+</ParamField>
+
+<ParamField path="verbose" type="bool">
+  Whether to show detailed reasoning and analysis. Default: False
+</ParamField>
+
+<ParamField path="resume_path" type="Optional[Path]">
+  Path to state JSON file to resume from previous session
+</ParamField>
+
+## Methods
+
+### run()
+
+Run the complete experiment loop from start to finish.
+
+```python
+controller.run()
+```
+
+This method:
+1. Profiles the dataset (if not already done)
+2. Runs baseline model (if not already done)
+3. Iteratively designs and executes experiments
+4. Analyzes results after each iteration
+5. Generates hypotheses for next iteration
+6. Terminates based on stopping conditions
+7. Generates final report and visualizations
+
+**Stopping conditions:**
+- Maximum iterations reached
+- Time budget exhausted
+- Performance plateau detected (3 iterations without improvement)
+- Target metric achieved
+- AI agent recommends stopping
+
+<Note>
+  The method handles all phases automatically. If execution fails, state is saved for potential resume.
+</Note>
+
+### save_state()
+
+Save current experiment state to disk.
+
+```python
+controller.save_state()
+```
+
+Saves to: `{output_dir}/state_{session_id}.json`
+
+**Saved information:**
+- All experiment results
+- Data profile
+- Best metric tracking
+- Current phase
+- Gemini conversation history
+- Termination status
+
+## Experiment Phases
+
+The controller tracks progress through these phases:
+
+<ResponseField name="INITIALIZING" type="ExperimentPhase">
+  Initial state before any work
+</ResponseField>
+
+<ResponseField name="DATA_PROFILING" type="ExperimentPhase">
+  Analyzing dataset with DataProfiler
+</ResponseField>
+
+<ResponseField name="BASELINE_MODELING" type="ExperimentPhase">
+  Running baseline model for comparison
+</ResponseField>
+
+<ResponseField name="EXPERIMENT_DESIGN" type="ExperimentPhase">
+  Using Gemini to design next experiment
+</ResponseField>
+
+<ResponseField name="CODE_GENERATION" type="ExperimentPhase">
+  Generating Python script from specification
+</ResponseField>
+
+<ResponseField name="EXPERIMENT_EXECUTION" type="ExperimentPhase">
+  Running generated script in subprocess
+</ResponseField>
+
+<ResponseField name="RESULTS_ANALYSIS" type="ExperimentPhase">
+  Analyzing experiment results with Gemini
+</ResponseField>
+
+<ResponseField name="HYPOTHESIS_GENERATION" type="ExperimentPhase">
+  Generating hypotheses for next iteration
+</ResponseField>
+
+<ResponseField name="REPORT_GENERATION" type="ExperimentPhase">
+  Creating final report with Gemini
+</ResponseField>
+
+<ResponseField name="COMPLETED" type="ExperimentPhase">
+  Successfully finished all work
+</ResponseField>
+
+<ResponseField name="FAILED" type="ExperimentPhase">
+  Fatal error occurred
+</ResponseField>
+
+## Components
+
+The controller initializes and coordinates these components:
+
+### Cognitive Layer (Gemini-powered)
+- **GeminiClient** - API client for Gemini
+- **ExperimentDesigner** - Designs experiments based on data and history
+- **ResultsAnalyzer** - Analyzes results and identifies patterns
+- **HypothesisGenerator** - Generates testable hypotheses
+- **ReportGenerator** - Creates final markdown report
+
+### Execution Layer
+- **DataProfiler** - Profiles dataset characteristics
+- **CodeGenerator** - Generates Python experiment scripts
+- **ExperimentRunner** - Executes scripts in subprocesses
+- **VisualizationGenerator** - Creates matplotlib plots
+
+### Persistence Layer
+- **MLflowTracker** - Logs experiments to MLflow
+- **ExperimentState** - Pydantic model for state management
+
+## Complete Example
+
+```python
+from pathlib import Path
+from src.orchestration.controller import ExperimentController
+
+# Create controller
+controller = ExperimentController(
+    data_path=Path("data/titanic.csv"),
+    target_column="survived",
+    task_type="classification",
+    constraints="""
+        - Prioritize interpretable models
+        - Must achieve F1 > 0.80
+        - Avoid ensemble methods with >100 trees
+    """,
+    max_iterations=15,
+    time_budget=1800,  # 30 minutes
+    output_dir=Path("outputs/titanic_run"),
+    verbose=True
+)
+
+# Run complete experiment loop
+try:
+    controller.run()
+    print("✓ Experiment completed successfully")
+    
+    # Access results
+    state = controller.state
+    print(f"Best experiment: {state.best_experiment}")
+    print(f"Best {state.config.primary_metric}: {state.best_metric:.4f}")
+    print(f"Total iterations: {state.current_iteration}")
+    print(f"Elapsed time: {state.get_elapsed_time():.0f}s")
+    
+except Exception as e:
+    print(f"✗ Experiment failed: {e}")
+    # State is automatically saved for resume
+```
+
+## Resuming Experiments
+
+Resume from a saved state file:
+
+```python
+# Resume from previous session
+controller = ExperimentController(
+    data_path=Path("data/housing.csv"),
+    target_column="price",
+    task_type="regression",
+    resume_path=Path("outputs/state_abc123.json")
+)
+
+controller.run()
+```
+
+<Info>
+  When resuming, all initialization parameters except `resume_path` are loaded from the state file.
+</Info>
+
+## State Management
+
+The controller maintains state using the `ExperimentState` Pydantic model:
+
+```python
+# Access current state
+state = controller.state
+
+# Get summary
+summary = state.get_summary()
+print(summary)
+# Output:
+# {
+#   'session_id': 'abc123',
+#   'phase': 'experiment_design',
+#   'current_iteration': 5,
+#   'max_iterations': 20,
+#   'elapsed_time': 450.3,
+#   'best_metric': 0.876,
+#   'best_experiment': 'rf_tuned_depth',
+#   'total_experiments': 6,
+#   'successful_experiments': 5
+# }
+```
+
+## MLflow Integration
+
+The controller automatically logs to MLflow:
+
+```python
+# MLflow experiment created as:
+experiment_name = f"autopilot_{dataset_name}_{session_id}"
+
+# Logged information:
+# - Data profile (parameters and JSON artifact)
+# - Each experiment run (parameters, metrics, code)
+# - Final summary (metrics, state JSON)
+# - Visualizations (PNG files)
+```
+
+View in MLflow UI:
+
+```bash
+mlflow ui --backend-store-uri ./mlruns
+# Open http://localhost:5000
+```
+
+## Iteration Loop Details
+
+Each iteration follows this sequence:
+
+```python
+def _run_iteration(self):
+    # 1. Design experiment using Gemini
+    spec = self._design_experiment()
+    
+    # 2. Generate Python script
+    script_path = self.code_generator.generate(spec, ...)
+    
+    # 3. Execute in subprocess
+    result = self.runner.run(script_path, spec, iteration)
+    
+    # 4. Update state
+    self.state.add_experiment(result)
+    
+    # 5. Log to MLflow
+    self.tracker.log_experiment(result)
+    
+    # 6. Analyze results with Gemini
+    analysis = self._analyze_results(result)
+    
+    # 7. Generate hypotheses for next iteration
+    hypotheses = self._generate_hypotheses(analysis)
+    
+    # 8. Save state
+    self.save_state()
+```
+
+## Constraint Parsing
+
+The controller parses natural language constraints:
+
+```python
+constraints = """
+- Only tree-based models (RandomForest, XGBoost)
+- Target RMSE < 5000
+- Prefer models with <500 trees for speed
+"""
+
+# Gemini extracts:
+# - Model restrictions
+# - Target metric value
+# - Performance vs speed tradeoffs
+```
+
+## Hypothesis-Driven Design
+
+The controller maintains cross-iteration context:
+
+```python
+# After each iteration:
+# 1. ResultsAnalyzer creates AnalysisResult
+#    - Compares to baseline and previous best
+#    - Identifies trend patterns
+#    - Notes key observations
+
+# 2. HypothesisGenerator creates HypothesisSet
+#    - Multiple testable hypotheses
+#    - Confidence scores and priorities
+#    - Suggested models and parameters
+
+# 3. ExperimentDesigner uses top hypothesis
+#    - Incorporates into next experiment design
+#    - Balances exploration vs exploitation
+```
+
+## Output Files
+
+The controller generates these outputs:
+
+```
+outputs/
+├── state_{session_id}.json          # Experiment state
+├── plots/
+│   ├── metric_progression.png       # Metric over time
+│   ├── model_comparison.png         # Model type comparison
+│   └── improvement_over_baseline.png # Baseline vs best
+├── report_{session_id}.md           # AI-generated report
+└── experiments/
+    └── {session_id}/
+        ├── baseline_*.py            # Baseline script
+        ├── experiment_1_*.py        # Generated scripts
+        └── ...
+```
+
+## Error Recovery
+
+```python
+try:
+    controller.run()
+except Exception as e:
+    # State is saved automatically
+    print(f"Error: {e}")
+    print(f"State saved to: {controller.output_dir}/state_*.json")
+    
+    # Can resume later:
+    # controller = ExperimentController(
+    #     data_path=...,
+    #     resume_path=Path("state_abc123.json")
+    # )
+```
+
+## Verbose Mode
+
+Enable verbose output to see detailed reasoning:
+
+```python
+controller = ExperimentController(
+    ...,
+    verbose=True
+)
+
+# Shows:
+# - Gemini's reasoning for each experiment design
+# - Detailed analysis after each iteration
+# - Hypothesis generation process
+# - Conversation history length
+```
+
+## Source Location
+
+`~/workspace/source/src/orchestration/controller.py`

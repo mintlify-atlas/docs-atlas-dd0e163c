@@ -1,0 +1,377 @@
+---
+title: GeminiClient
+description: Client for interacting with Gemini 3 API with Thought Signatures support
+---
+
+## Overview
+
+The `GeminiClient` is a robust API client for Google's Gemini 3 model, featuring retry logic with exponential backoff, multi-turn conversation support, and configurable thinking levels for Thought Signatures.
+
+### Key Features
+
+- Temperature fixed at 1.0 (required for Thought Signatures)
+- Retry logic with exponential backoff for rate limit handling
+- Multi-turn conversation history management
+- JSON response parsing with markdown cleanup
+- Configurable thinking levels (low, medium, high)
+
+## Class Definition
+
+```python
+class GeminiClient:
+    """Client for interacting with Gemini 3 API with Thought Signatures."""
+
+    def __init__(self, config: Optional[GeminiConfig] = None):
+        """Initialize the Gemini client.
+
+        Args:
+            config: Optional GeminiConfig. If not provided, loads from environment.
+        """
+```
+
+## Constructor
+
+<ParamField path="config" type="Optional[GeminiConfig]" default="None">
+  Configuration object for Gemini API. If not provided, configuration is loaded from environment variables using `get_config().gemini`.
+</ParamField>
+
+## Methods
+
+### generate
+
+Generate a response from Gemini with optional system instructions and conversation history.
+
+```python
+def generate(
+    self,
+    prompt: str,
+    system_instruction: Optional[str] = None,
+    thinking_level: ThinkingLevel = "high",
+    use_history: bool = False,
+) -> GeminiResponse:
+    """Generate a response from Gemini.
+
+    Args:
+        prompt: The user prompt.
+        system_instruction: Optional system-level instruction.
+        thinking_level: Level of thinking (low/medium/high).
+        use_history: Whether to include conversation history.
+
+    Returns:
+        GeminiResponse with text and optional thinking.
+
+    Raises:
+        GeminiError: If all retries fail.
+    """
+```
+
+#### Parameters
+
+<ParamField path="prompt" type="str" required>
+  The user prompt to send to Gemini.
+</ParamField>
+
+<ParamField path="system_instruction" type="Optional[str]" default="None">
+  Optional system-level instruction to guide the model's behavior.
+</ParamField>
+
+<ParamField path="thinking_level" type="ThinkingLevel" default="high">
+  Level of thinking/reasoning to use. Must be one of: `"low"`, `"medium"`, or `"high"`.
+</ParamField>
+
+<ParamField path="use_history" type="bool" default="False">
+  Whether to include conversation history in the request.
+</ParamField>
+
+#### Returns
+
+<ResponseField name="GeminiResponse" type="GeminiResponse">
+  Response object containing:
+  - `text` (str): The generated text response
+  - `thinking` (Optional[str]): Optional thinking process output
+  - `raw_response` (Optional[object]): Raw API response object
+</ResponseField>
+
+### generate_json
+
+Generate and parse a JSON response from Gemini, with automatic cleanup of markdown code blocks.
+
+```python
+def generate_json(
+    self,
+    prompt: str,
+    system_instruction: Optional[str] = None,
+    thinking_level: ThinkingLevel = "high",
+) -> dict:
+    """Generate and parse a JSON response from Gemini.
+
+    Args:
+        prompt: The user prompt (should request JSON output).
+        system_instruction: Optional system-level instruction.
+        thinking_level: Level of thinking (low/medium/high).
+
+    Returns:
+        Parsed JSON dict.
+
+    Raises:
+        GeminiInvalidResponseError: If response cannot be parsed as JSON.
+    """
+```
+
+#### Parameters
+
+<ParamField path="prompt" type="str" required>
+  The user prompt. A JSON instruction is automatically appended to ensure JSON output.
+</ParamField>
+
+<ParamField path="system_instruction" type="Optional[str]" default="None">
+  Optional system-level instruction.
+</ParamField>
+
+<ParamField path="thinking_level" type="ThinkingLevel" default="high">
+  Level of thinking/reasoning to use.
+</ParamField>
+
+#### Returns
+
+<ResponseField name="result" type="dict">
+  Parsed JSON response as a Python dictionary. Automatically strips markdown code blocks (```json, ```) if present.
+</ResponseField>
+
+### add_message
+
+Manually add a message to the conversation history.
+
+```python
+def add_message(self, role: Literal["user", "model"], content: str):
+    """Add a message to the conversation history.
+
+    Args:
+        role: The role (user or model).
+        content: The message content.
+    """
+```
+
+#### Parameters
+
+<ParamField path="role" type="Literal['user', 'model']" required>
+  The role of the message sender. Must be either `"user"` or `"model"`.
+</ParamField>
+
+<ParamField path="content" type="str" required>
+  The message content to add to history.
+</ParamField>
+
+### clear_history
+
+Clear the conversation history.
+
+```python
+def clear_history(self):
+    """Clear the conversation history."""
+```
+
+### get_history_length
+
+Get the number of messages in the conversation history.
+
+```python
+def get_history_length(self) -> int:
+    """Get the number of messages in conversation history."""
+```
+
+#### Returns
+
+<ResponseField name="length" type="int">
+  The number of messages currently in the conversation history.
+</ResponseField>
+
+## Data Classes
+
+### GeminiResponse
+
+```python
+@dataclass
+class GeminiResponse:
+    """Response from Gemini API."""
+
+    text: str
+    thinking: Optional[str] = None
+    raw_response: Optional[object] = None
+```
+
+### ConversationMessage
+
+```python
+@dataclass
+class ConversationMessage:
+    """A message in the conversation history."""
+
+    role: Literal["user", "model"]
+    content: str
+```
+
+## Exceptions
+
+### GeminiError
+
+Base exception for all Gemini-related errors.
+
+```python
+class GeminiError(Exception):
+    """Base exception for Gemini-related errors."""
+    pass
+```
+
+### GeminiRateLimitError
+
+Raised when API rate limit is exceeded. The client automatically retries with exponential backoff.
+
+```python
+class GeminiRateLimitError(GeminiError):
+    """Rate limit exceeded."""
+    pass
+```
+
+### GeminiInvalidResponseError
+
+Raised when the response from Gemini cannot be parsed (e.g., invalid JSON).
+
+```python
+class GeminiInvalidResponseError(GeminiError):
+    """Invalid or unparseable response from Gemini."""
+    pass
+```
+
+## Usage Examples
+
+### Basic Usage
+
+```python
+from src.cognitive.gemini_client import GeminiClient
+
+# Initialize client (loads config from environment)
+client = GeminiClient()
+
+# Generate a simple response
+response = client.generate("Design an ML experiment for predicting house prices")
+print(response.text)
+```
+
+### Multi-turn Conversation
+
+```python
+# Start a conversation
+client = GeminiClient()
+
+# First turn
+response1 = client.generate(
+    "What preprocessing should I use for a dataset with missing values?",
+    use_history=True
+)
+
+# Add follow-up manually
+client.add_message("user", "What about categorical features?")
+response2 = client.generate(
+    "How should I encode them?",
+    use_history=True
+)
+
+# Check history length
+print(f"Conversation has {client.get_history_length()} messages")
+```
+
+### JSON Generation
+
+```python
+# Request structured JSON output
+prompt = """
+Design an experiment with:
+- experiment_name
+- model_type
+- model_params
+"""
+
+try:
+    result = client.generate_json(
+        prompt=prompt,
+        system_instruction="You are an ML experiment designer.",
+        thinking_level="high"
+    )
+    print(f"Model: {result['model_type']}")
+    print(f"Params: {result['model_params']}")
+except GeminiInvalidResponseError as e:
+    print(f"Failed to parse JSON: {e}")
+```
+
+### Custom Configuration
+
+```python
+from src.config import GeminiConfig
+
+# Create custom config
+config = GeminiConfig(
+    api_key="your-api-key",
+    model="gemini-3-5-flash",
+    temperature=1.0,
+    max_retries=5,
+    retry_delay=2.0
+)
+
+client = GeminiClient(config=config)
+```
+
+### Error Handling
+
+```python
+from src.cognitive.gemini_client import (
+    GeminiClient,
+    GeminiError,
+    GeminiRateLimitError,
+    GeminiInvalidResponseError
+)
+
+client = GeminiClient()
+
+try:
+    response = client.generate_json("Design an experiment")
+except GeminiRateLimitError:
+    print("Rate limit exceeded after retries")
+except GeminiInvalidResponseError as e:
+    print(f"Invalid JSON response: {e}")
+except GeminiError as e:
+    print(f"Gemini API error: {e}")
+```
+
+## Helper Function
+
+### create_experiment_designer_prompt
+
+Utility function to create a formatted prompt for experiment design.
+
+```python
+def create_experiment_designer_prompt(
+    data_profile: dict,
+    previous_results: list[dict],
+    constraints: Optional[str] = None,
+    task_type: str = "regression",
+) -> str:
+    """Create a prompt for the experiment designer.
+
+    Args:
+        data_profile: Dataset profile from DataProfiler.
+        previous_results: List of previous experiment results.
+        constraints: Optional user constraints.
+        task_type: 'classification' or 'regression'.
+
+    Returns:
+        Formatted prompt string.
+    """
+```
+
+## See Also
+
+- [ExperimentDesigner](/api/experiment-designer) - Uses GeminiClient for experiment design
+- [ResultsAnalyzer](/api/results-analyzer) - Uses GeminiClient for results analysis
+- [HypothesisGenerator](/api/hypothesis-generator) - Uses GeminiClient for hypothesis generation
+- [ReportGenerator](/api/report-generator) - Uses GeminiClient for report generation

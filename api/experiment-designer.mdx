@@ -1,0 +1,450 @@
+---
+title: ExperimentDesigner
+description: Gemini-powered ML experiment design with hypothesis-driven approach
+---
+
+## Overview
+
+The `ExperimentDesigner` uses Gemini 3 to design machine learning experiments based on data profiles, previous results, and user constraints. It maintains conversation context for Thought Signature continuity and provides intelligent fallbacks when the API is unavailable.
+
+### Key Features
+
+- Hypothesis-driven experiment design
+- Learns from previous experiment results
+- Parses and respects user constraints from Markdown
+- Maintains conversation context across iterations
+- Intelligent fallback when Gemini fails
+- Filters template-managed parameters to prevent duplicates
+
+## Class Definition
+
+```python
+class ExperimentDesigner:
+    """Designs ML experiments using Gemini 3.
+
+    Key features:
+    - Hypothesis-driven experiment design
+    - Learns from previous experiment results
+    - Respects user constraints
+    - Maintains conversation context for Thought Signature continuity
+    - Intelligent fallback when Gemini fails
+    """
+
+    def __init__(self, gemini_client: GeminiClient):
+        """Initialize the experiment designer.
+
+        Args:
+            gemini_client: Shared GeminiClient instance for API calls.
+                           Sharing preserves conversation history.
+        """
+```
+
+## Constructor
+
+<ParamField path="gemini_client" type="GeminiClient" required>
+  Shared `GeminiClient` instance for API calls. Sharing the same client across cognitive components preserves conversation history and enables Thought Signature continuity.
+</ParamField>
+
+## Methods
+
+### design_experiment
+
+Design the next experiment based on data profile and historical results.
+
+```python
+def design_experiment(
+    self,
+    data_profile: DataProfile,
+    previous_results: list[ExperimentResult],
+    task_type: str,
+    constraints: Optional[str] = None,
+    iteration: int = 1,
+) -> ExperimentSpec:
+    """Design the next experiment based on data and history.
+
+    Args:
+        data_profile: Profile of the dataset from DataProfiler.
+        previous_results: List of previous experiment results.
+        task_type: "classification" or "regression".
+        constraints: Optional user constraints as Markdown text.
+        iteration: Current iteration number.
+
+    Returns:
+        ExperimentSpec ready for code generation.
+
+    Raises:
+        GeminiError: If API call fails and no fallback available.
+    """
+```
+
+#### Parameters
+
+<ParamField path="data_profile" type="DataProfile" required>
+  Profile of the dataset from `DataProfiler`, containing:
+  - `n_rows`: Number of rows
+  - `n_columns`: Number of columns
+  - `numeric_columns`: List of numeric column names
+  - `categorical_columns`: List of categorical column names
+  - `target_column`: Name of target column
+  - `target_type`: Type of target (numeric/categorical)
+  - `missing_values`: Dictionary of column names to missing value counts
+  - `target_stats`: Optional statistics about the target variable
+</ParamField>
+
+<ParamField path="previous_results" type="list[ExperimentResult]" required>
+  List of previous experiment results. Each `ExperimentResult` contains metrics, model type, hypothesis, and success status.
+</ParamField>
+
+<ParamField path="task_type" type="str" required>
+  Type of ML task. Must be either `"classification"` or `"regression"`.
+</ParamField>
+
+<ParamField path="constraints" type="Optional[str]" default="None">
+  Optional user constraints as Markdown text. Can include:
+  - Preferred/avoided models
+  - Primary metric preferences
+  - Preprocessing hints
+  - Termination rules
+</ParamField>
+
+<ParamField path="iteration" type="int" default="1">
+  Current iteration number in the experiment loop.
+</ParamField>
+
+#### Returns
+
+<ResponseField name="ExperimentSpec" type="ExperimentSpec">
+  Experiment specification ready for code generation, containing:
+  - `experiment_name` (str): Descriptive name for the experiment
+  - `hypothesis` (str): What is being tested and why
+  - `model_type` (str): sklearn model class name (e.g., "RandomForestRegressor")
+  - `model_params` (dict): Model hyperparameters (template-managed params filtered out)
+  - `preprocessing` (PreprocessingConfig): Preprocessing configuration
+  - `reasoning` (str): Detailed explanation of design choices
+</ResponseField>
+
+### parse_constraints
+
+Parse Markdown constraints text into structured configuration.
+
+```python
+def parse_constraints(self, constraints_text: str) -> ParsedConstraints:
+    """Parse Markdown constraints text into structured config.
+
+    Args:
+        constraints_text: Raw Markdown text from constraints file.
+
+    Returns:
+        ParsedConstraints with extracted values.
+    """
+```
+
+#### Parameters
+
+<ParamField path="constraints_text" type="str" required>
+  Raw Markdown text containing user constraints. Supports sections like:
+  - `## Metrics`: Primary metric specification
+  - `## Models`: Preferred/avoided models
+  - `## Preprocessing`: Preprocessing hints
+  - `## Termination`: Termination rules
+</ParamField>
+
+#### Returns
+
+<ResponseField name="ParsedConstraints" type="ParsedConstraints">
+  Structured constraints object containing:
+  - `primary_metric` (Optional[str]): Primary metric name
+  - `preferred_models` (list[str]): List of preferred model types
+  - `avoided_models` (list[str]): List of models to avoid
+  - `preprocessing_hints` (list[str]): Preprocessing suggestions
+  - `termination_rules` (dict): Termination conditions
+  - `raw_text` (str): Original constraint text
+</ResponseField>
+
+### select_primary_metric
+
+Select the primary metric based on task type and constraints.
+
+```python
+def select_primary_metric(
+    self,
+    task_type: str,
+    constraints: Optional[ParsedConstraints] = None,
+) -> str:
+    """Select the primary metric based on task and constraints.
+
+    Args:
+        task_type: "classification" or "regression".
+        constraints: Parsed constraints (may contain metric preference).
+
+    Returns:
+        Primary metric name.
+    """
+```
+
+#### Parameters
+
+<ParamField path="task_type" type="str" required>
+  Type of ML task: `"classification"` or `"regression"`.
+</ParamField>
+
+<ParamField path="constraints" type="Optional[ParsedConstraints]" default="None">
+  Parsed constraints that may include a primary metric preference.
+</ParamField>
+
+#### Returns
+
+<ResponseField name="metric" type="str">
+  Primary metric name. Defaults to:
+  - `"rmse"` for regression tasks
+  - `"f1"` for classification tasks
+  
+  If constraints specify a metric, that takes precedence.
+</ResponseField>
+
+### get_design_count
+
+Get the number of experiments designed so far.
+
+```python
+def get_design_count(self) -> int:
+    """Get the number of experiments designed so far."""
+```
+
+#### Returns
+
+<ResponseField name="count" type="int">
+  The total number of experiments designed by this instance.
+</ResponseField>
+
+### get_parsed_constraints
+
+Get the parsed constraints if available.
+
+```python
+def get_parsed_constraints(self) -> Optional[ParsedConstraints]:
+    """Get the parsed constraints if available."""
+```
+
+#### Returns
+
+<ResponseField name="constraints" type="Optional[ParsedConstraints]">
+  The parsed constraints object, or `None` if no constraints have been parsed.
+</ResponseField>
+
+## Data Classes
+
+### ParsedConstraints
+
+```python
+@dataclass
+class ParsedConstraints:
+    """Parsed user constraints from Markdown."""
+
+    primary_metric: Optional[str] = None
+    preferred_models: list[str] = None
+    avoided_models: list[str] = None
+    preprocessing_hints: list[str] = None
+    termination_rules: dict = None
+    raw_text: str = ""
+```
+
+## System Prompt
+
+The designer uses a comprehensive system prompt that guides Gemini to:
+
+- Apply hypothesis-driven experimentation principles
+- Learn from both successes and failures
+- Consider data characteristics when selecting models
+- Balance exploration vs exploitation
+- Avoid repeating previous experiments
+
+### Available Models
+
+**Regression:**
+- LinearRegression, Ridge, Lasso, ElasticNet
+- RandomForestRegressor, GradientBoostingRegressor, DecisionTreeRegressor
+- SVR, KNeighborsRegressor
+- XGBRegressor, LGBMRegressor
+
+**Classification:**
+- LogisticRegression, GaussianNB
+- RandomForestClassifier, GradientBoostingClassifier, DecisionTreeClassifier
+- SVC, KNeighborsClassifier
+- XGBClassifier, LGBMClassifier
+
+### Preprocessing Options
+
+- **missing_values**: `"drop"`, `"mean"`, `"median"`, `"mode"`, `"constant"`
+- **scaling**: `"standard"`, `"minmax"`, `"none"`
+- **encoding**: `"onehot"`, `"ordinal"`
+- **target_transform**: `"log"`, `"none"` (regression only)
+
+## Usage Examples
+
+### Basic Experiment Design
+
+```python
+from src.cognitive.gemini_client import GeminiClient
+from src.cognitive.experiment_designer import ExperimentDesigner
+
+# Initialize
+client = GeminiClient()
+designer = ExperimentDesigner(gemini_client=client)
+
+# Design first experiment
+spec = designer.design_experiment(
+    data_profile=profile,
+    previous_results=[],
+    task_type="regression",
+    iteration=1
+)
+
+print(f"Experiment: {spec.experiment_name}")
+print(f"Hypothesis: {spec.hypothesis}")
+print(f"Model: {spec.model_type}")
+print(f"Params: {spec.model_params}")
+```
+
+### With User Constraints
+
+```python
+constraints_md = """
+## Metrics
+Primary metric: R2
+
+## Models
+- Prefer tree-based models
+- Avoid linear models
+
+## Preprocessing
+- Use median imputation for missing values
+- Apply standard scaling
+"""
+
+spec = designer.design_experiment(
+    data_profile=profile,
+    previous_results=results,
+    task_type="regression",
+    constraints=constraints_md,
+    iteration=2
+)
+```
+
+### Iterative Design Loop
+
+```python
+from src.orchestration.state import ExperimentState
+
+# Initialize state
+state = ExperimentState(config=config)
+designer = ExperimentDesigner(gemini_client=client)
+
+# Design and execute experiments
+for iteration in range(1, 11):
+    # Design next experiment
+    spec = designer.design_experiment(
+        data_profile=state.data_profile,
+        previous_results=state.experiments,
+        task_type=state.config.task_type.value,
+        constraints=state.config.constraints,
+        iteration=iteration
+    )
+    
+    # Execute experiment (code generation, execution, etc.)
+    result = execute_experiment(spec)
+    
+    # Update state
+    state.add_experiment(result)
+    
+    # Check for early stopping
+    if should_stop(state):
+        break
+
+print(f"Designed {designer.get_design_count()} experiments")
+```
+
+### Parsing Constraints
+
+```python
+constraints_text = """
+## Metrics
+Primary metric: F1 score
+
+## Models
+Prefer Random Forest and XGBoost
+Avoid SVM models
+
+## Termination
+Stop after 5 iterations with no improvement
+"""
+
+parsed = designer.parse_constraints(constraints_text)
+print(f"Primary metric: {parsed.primary_metric}")
+print(f"Preferred: {parsed.preferred_models}")
+print(f"Avoided: {parsed.avoided_models}")
+print(f"Plateau threshold: {parsed.termination_rules.get('plateau_threshold')}")
+```
+
+### Accessing Parsed Constraints
+
+```python
+# After first design with constraints
+spec1 = designer.design_experiment(
+    data_profile=profile,
+    previous_results=[],
+    task_type="classification",
+    constraints=constraints_md,
+    iteration=1
+)
+
+# Constraints are cached and reused
+constraints = designer.get_parsed_constraints()
+if constraints:
+    metric = designer.select_primary_metric(
+        task_type="classification",
+        constraints=constraints
+    )
+    print(f"Using metric: {metric}")
+```
+
+### Fallback Handling
+
+```python
+try:
+    spec = designer.design_experiment(
+        data_profile=profile,
+        previous_results=results,
+        task_type="regression",
+        iteration=5
+    )
+    
+    # Check if fallback was used
+    if "fallback" in spec.experiment_name.lower():
+        print("Used fallback design due to Gemini error")
+        print(f"Reasoning: {spec.reasoning}")
+except GeminiError as e:
+    print(f"Design failed: {e}")
+```
+
+## Template-Managed Parameters
+
+The following parameters are automatically managed by Jinja2 templates and are filtered out from `model_params` to prevent duplicate keyword arguments:
+
+- `random_state`
+- `n_jobs`
+- `verbose`
+- `max_iter` (for certain models)
+- `probability`
+- `verbosity`
+- `nthread`
+- `num_threads`
+
+These parameters are set consistently across all generated experiments via the code generation templates.
+
+## See Also
+
+- [GeminiClient](/api/gemini-client) - Underlying API client
+- [ResultsAnalyzer](/api/results-analyzer) - Analyzes experiment results
+- [HypothesisGenerator](/api/hypothesis-generator) - Generates testable hypotheses
+- [DataProfiler](/api/data-profiler) - Generates data profiles for design input

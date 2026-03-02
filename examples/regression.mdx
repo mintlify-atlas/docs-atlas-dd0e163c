@@ -1,0 +1,248 @@
+---
+title: 'Regression Example'
+description: 'Complete regression example using the California Housing dataset'
+---
+
+This guide demonstrates a complete regression workflow using the California Housing dataset (20,640 samples).
+
+## Dataset Overview
+
+The California Housing dataset contains information about housing prices in California.
+
+**Features:**
+- `MedInc`: Median income in block group
+- `HouseAge`: Median house age in block group
+- `AveRooms`: Average number of rooms per household
+- `AveBedrms`: Average number of bedrooms per household
+- `Population`: Block group population
+- `AveOccup`: Average number of household members
+- `Latitude`: Block group latitude
+- `Longitude`: Block group longitude
+
+**Target:**
+- `MedHouseVal`: Median house value in block group (in $100,000s)
+
+**Size:** 20,640 rows
+
+## Basic Usage
+
+Run a regression experiment with default settings:
+
+```bash
+python -m src.main run \
+  --data data/sample/california_housing.csv \
+  --target MedHouseVal \
+  --task regression \
+  --max-iterations 3 \
+  --verbose
+```
+
+### What Happens
+
+1. **Data Profiling**: Analyzes schema, distributions, and missing values
+2. **Baseline Model**: Trains a simple Linear Regression to establish performance floor
+3. **Iteration Loop**: Gemini designs, executes, and analyzes experiments
+4. **Report Generation**: Creates a narrative Markdown report with insights
+
+### Expected Output
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║  ITERATION 1 - GEMINI'S REASONING                            ║
+║  Thought Signature Active | Context: 4 turns                 ║
+╚══════════════════════════════════════════════════════════════╝
+
+Based on the data profile, I observe:
+- Target variable (MedHouseVal) has a right-skewed distribution
+- Latitude and Longitude suggest geographic patterns
+- No missing values detected
+
+For this iteration, I'm testing Random Forest with default parameters
+to establish a non-linear baseline...
+
+┌─────────────────────────────────────────────────────────────┐
+│ RESULTS ANALYSIS                                            │
+├─────────────────────────────────────────────────────────────┤
+│ Trend: IMPROVING                                            │
+│ RMSE: 0.4823   ★ NEW BEST                                   │
+│   35.2% better than baseline                                │
+│                                                             │
+│ Key Observations:                                           │
+│   - Tree-based model outperforms linear baseline            │
+│   - Geographic features appear important                    │
+│   - Potential for further tuning                            │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## With Constraints
+
+Guide the experiment with natural language preferences:
+
+<Tabs>
+  <Tab title="Command">
+    ```bash
+    python -m src.main run \
+      --data data/sample/california_housing.csv \
+      --target MedHouseVal \
+      --task regression \
+      --constraints data/sample/constraints.md \
+      --max-iterations 5 \
+      --verbose
+    ```
+  </Tab>
+  <Tab title="constraints.md">
+    ```markdown
+    # Experiment Constraints
+
+    ## Metrics
+    - Primary metric: RMSE
+
+    ## Models
+    - Prefer tree-based models
+    - Prefer boosting methods
+
+    ## Preprocessing
+    - Log-transform the target variable
+    - Use median imputation for missing values
+
+    ## Termination
+    - Stop if no improvement for 3 iterations
+    ```
+  </Tab>
+</Tabs>
+
+### Impact of Constraints
+
+With these constraints, Gemini will:
+- Focus on tree-based models (Random Forest, XGBoost, LightGBM)
+- Apply log transformation to the target variable
+- Use RMSE as the primary optimization metric
+- Stop early if performance plateaus
+
+## Advanced Configuration
+
+<Tabs>
+  <Tab title="Extended Budget">
+    Run more iterations with a longer time budget:
+    ```bash
+    python -m src.main run \
+      --data data/sample/california_housing.csv \
+      --target MedHouseVal \
+      --task regression \
+      --max-iterations 10 \
+      --time-budget 7200 \
+      --verbose
+    ```
+  </Tab>
+  <Tab title="Custom Output">
+    Save results to a custom directory:
+    ```bash
+    python -m src.main run \
+      --data data/sample/california_housing.csv \
+      --target MedHouseVal \
+      --task regression \
+      --output-dir ./my_experiment \
+      --max-iterations 5
+    ```
+  </Tab>
+  <Tab title="Resume">
+    Resume an interrupted experiment:
+    ```bash
+    python -m src.main run \
+      --resume outputs/state_20260302_143022.json
+    ```
+  </Tab>
+</Tabs>
+
+## Interpreting Results
+
+### Metric Progression
+
+After running the experiment, you'll see a progression chart in `outputs/plots/metric_progression.png`:
+
+- **X-axis**: Iteration number
+- **Y-axis**: RMSE (lower is better)
+- **Trend**: Ideally decreasing over iterations
+
+### Best Model Details
+
+The final report (`outputs/reports/experiment_report_TIMESTAMP.md`) includes:
+
+```markdown
+## Best Model
+
+**Model**: XGBRegressor
+**RMSE**: 0.1332
+**Improvement over baseline**: 82.1%
+
+### Hyperparameters
+- learning_rate: 0.1
+- max_depth: 6
+- n_estimators: 100
+- subsample: 0.8
+
+### Preprocessing
+- Target transformation: log
+- Feature scaling: StandardScaler
+- Missing value handling: median imputation
+```
+
+### Key Insights Example
+
+> "Log transformation of the target variable was critical, reducing RMSE by 80%. 
+> Gradient boosting methods (XGBoost, LightGBM) consistently outperformed bagging 
+> approaches. Geographic features (Latitude, Longitude) showed high feature importance, 
+> suggesting spatial patterns in housing prices."
+
+## Viewing in MLflow
+
+Launch the MLflow UI to explore all experiments:
+
+```bash
+mlflow ui --backend-store-uri file:./outputs/mlruns
+# Open http://127.0.0.1:5000
+```
+
+In the MLflow UI, you can:
+- Compare metrics across all iterations
+- View hyperparameters for each experiment
+- Download saved model artifacts
+- Visualize feature importance
+- Export results to CSV
+
+## Common Results
+
+Typical results for this dataset:
+
+| Iteration | Model | RMSE | Improvement |
+|-----------|-------|------|-------------|
+| Baseline | LinearRegression | 0.7445 | - |
+| 1 | RandomForest | 0.4823 | 35.2% |
+| 2 | RandomForest + log | 0.1489 | 80.0% |
+| 3 | XGBRegressor | 0.1332 | 82.1% |
+| 4 | LGBMRegressor | 0.1345 | 81.9% |
+| 5 | XGBRegressor tuned | 0.1287 | 82.7% |
+
+### Why These Results?
+
+- **Tree-based models excel**: Capture non-linear relationships between features and target
+- **Log transformation critical**: Target variable (house prices) is right-skewed
+- **Boosting outperforms bagging**: Gradient boosting captures residual patterns
+- **Geographic features important**: Spatial location strongly correlates with price
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Classification Example" icon="binary" href="/examples/classification">
+    Learn how to run classification experiments
+  </Card>
+  <Card title="Advanced Constraints" icon="sliders" href="/examples/advanced-constraints">
+    Explore complex constraint configurations
+  </Card>
+  <Card title="CLI Reference" icon="terminal" href="/cli/run-command">
+    View all available command options
+  </Card>
+  <Card title="Interpretation" icon="chart-line" href="/guides/understanding-results">
+    Deep dive into result interpretation
+  </Card>
+</CardGroup>

@@ -1,0 +1,559 @@
+---
+title: Experiment Loop
+description: How the autonomous iteration cycle designs, executes, and learns from experiments
+---
+
+The **experiment loop** is the core of ML Experiment Autopilot's autonomous operation. It's a continuous cycle where Gemini 3 designs experiments, the system executes them, analyzes results, and generates new hypotheses — all without human intervention.
+
+## High-Level Flow
+
+```
+Input: Dataset + Target + Task Type + (optional) Constraints
+                    │
+                    ▼
+            ┌────────────────┐
+            │ DATA PROFILING │  Analyze schema, distributions, missing values
+            └───────┬────────┘
+                    │
+                    ▼
+            ┌────────────────┐
+            │ BASELINE MODEL │  Simple model to establish performance floor
+            └───────┬────────┘
+                    │
+                    ▼
+    ┌────────────────────────────────────┐
+    │          ITERATION LOOP            │
+    │                                    │
+    │  1. Experiment Design (Gemini)     │  ← hypothesis, model, params
+    │  2. Code Generation (Jinja2)       │  ← validated Python script
+    │  3. Execution (subprocess)         │  ← train, evaluate, capture metrics
+    │  4. Results Analysis (Gemini)      │  ← trends, comparisons, insights
+    │  5. Hypothesis Generation (Gemini) │  ← ranked next steps
+    │  6. Termination Check              │  ← continue or stop?
+    │                                    │
+    │  Repeat until termination...       │
+    └───────────────┬────────────────────┘
+                    │
+                    ▼
+          ┌───────────────────┐
+          │ REPORT GENERATION │  Gemini writes narrative Markdown report
+          └─────────┬─────────┘
+                    │
+                    ▼
+Output: Best Model + Report + Visualizations + MLflow Experiment + Code
+```
+
+---
+
+## Phase 1: Data Profiling
+
+Location: `src/orchestration/controller.py:160`
+
+Before any experiments run, the system analyzes the dataset to understand its characteristics.
+
+### What Gets Profiled
+
+The `DataProfiler` (src/execution/data_profiler.py) extracts:
+
+- **Schema**: Column names, data types (numeric vs categorical)
+- **Missing Values**: Count and percentage per column
+- **Numeric Statistics**: Mean, std, min, max, quartiles for each numeric column
+- **Categorical Statistics**: Unique values, most common values
+- **Target Distribution**:
+  - Regression: Mean, std, skewness, min/max
+  - Classification: Class counts, class balance
+
+### Example Profile Output
+
+```python
+DataProfile(
+    n_rows=20640,
+    n_columns=9,
+    numeric_columns=["MedInc", "HouseAge", "AveRooms", ...],
+    categorical_columns=[],
+    target_column="MedHouseVal",
+    target_type="continuous",
+    missing_values={"total_bedrooms": 207},
+    target_stats={
+        "mean": 2.07,
+        "std": 1.15,
+        "skew": 0.98,  # Right-skewed → consider log transform
+    }
+)
+```
+
+### Why This Matters
+
+The data profile is sent to Gemini with **every experiment design request**. It informs:
+- Missing value handling strategy (median vs mode vs drop)
+- Scaling choices (standard vs minmax vs none)
+- Target transformations (log for skewed regression targets)
+- Model selection (tree models handle missing values better than linear models)
+
+<Info>
+The data profile is also logged to MLflow and displayed in the console when you run with `--verbose`.
+</Info>
+
+---
+
+## Phase 2: Baseline Model
+
+Location: `src/orchestration/controller.py:194`
+
+The baseline establishes a **performance floor** — the minimum acceptable result.
+
+### Baseline Models
+
+| Task Type | Baseline Model | Reasoning |
+|-----------|----------------|------------|
+| Regression | LinearRegression | Simplest possible model |
+| Classification | LogisticRegression | Simplest possible model |
+
+No hyperparameter tuning — just default sklearn settings.
+
+### Baseline Result Example
+
+```
+Iteration 0: baseline
+  Model: LinearRegression
+  RMSE: 0.7343
+  Execution Time: 0.8s
+```
+
+This becomes the **baseline_value** that all future experiments are compared against.
+
+<Note>
+If the baseline fails (e.g., due to data issues), the loop stops immediately. A successful baseline is required to proceed.
+</Note>
+
+---
+
+## Phase 3: Iteration Loop (Steps 1-6)
+
+Location: `src/orchestration/controller.py:245`
+
+This is where the magic happens. The loop repeats until a termination criterion is met.
+
+### Step 1: Experiment Design (Gemini)
+
+Location: `src/orchestration/controller.py:330`
+
+The `ExperimentDesigner` uses Gemini 3 to design the next experiment.
+
+**Input to Gemini:**
+- Data profile (schema, stats, missing values)
+- Last 5 experiment results (name, model, metrics, hypothesis, success/failure)
+- User constraints (if provided)
+- **Top hypothesis from previous iteration** (added to constraints)
+
+**Gemini's Task:**
+1. Formulate a clear hypothesis for what to test
+2. Select a model (avoid repeating unless with different params)
+3. Choose hyperparameters
+4. Specify preprocessing (missing values, scaling, encoding, target transform)
+5. Explain the reasoning
+
+**Output:**
+```json
+{
+  "experiment_name": "xgboost_tuned_learning_rate",
+  "hypothesis": "Lower learning rate with more estimators may reduce overfitting",
+  "model_type": "XGBRegressor",
+  "model_params": {
+    "n_estimators": 200,
+    "learning_rate": 0.05,
+    "max_depth": 6
+  },
+  "preprocessing": {
+    "missing_values": "median",
+    "scaling": "standard",
+    "target_transform": "log"
+  },
+  "reasoning": "Previous iteration showed XGBoost overfit with learning_rate=0.1. Reducing to 0.05 and increasing n_estimators should improve generalization."
+}
+```
+
+This JSON is parsed into an `ExperimentSpec` object (src/orchestration/state.py:58).
+
+<Tip>
+**Hypothesis Context Injection**: The top hypothesis from the previous iteration is automatically added to the constraints (src/orchestration/controller.py:336). This creates a feedback loop where each iteration builds on the last.
+</Tip>
+
+### Step 2: Code Generation (Jinja2)
+
+Location: `src/orchestration/controller.py:271`
+
+The `CodeGenerator` (src/execution/code_generator.py) converts the `ExperimentSpec` into executable Python code using Jinja2 templates.
+
+**Template Selection:**
+- `sklearn_regressor.py.jinja` for LinearRegression, Ridge, RandomForestRegressor, etc.
+- `sklearn_classifier.py.jinja` for LogisticRegression, RandomForestClassifier, etc.
+- `xgboost_model.py.jinja` for XGBRegressor/XGBClassifier
+- `lightgbm_model.py.jinja` for LGBMRegressor/LGBMClassifier
+
+**Generated Script Structure:**
+```python
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from xgboost import XGBRegressor
+import json
+
+# Load data
+df = pd.read_csv("data/sample/california_housing.csv")
+
+# Handle missing values (median imputation)
+# ... preprocessing code ...
+
+# Apply target transform (log)
+y_train_transformed = np.log1p(y_train)
+y_test_transformed = np.log1p(y_test)
+
+# Train model
+model = XGBRegressor(
+    n_estimators=200,
+    learning_rate=0.05,
+    max_depth=6,
+    random_state=42,
+    n_jobs=-1
+)
+model.fit(X_train_scaled, y_train_transformed)
+
+# Evaluate
+y_pred_transformed = model.predict(X_test_scaled)
+y_pred = np.expm1(y_pred_transformed)  # Inverse log transform
+
+rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+mae = mean_absolute_error(y_test, y_pred)
+r2 = r2_score(y_test, y_pred)
+
+# Output JSON
+result = {
+    "metrics": {"rmse": rmse, "mae": mae, "r2": r2},
+    "model_path": "outputs/models/model_iter_3.pkl",
+    "success": True
+}
+print(json.dumps(result))
+```
+
+**Validation**: The script is parsed with `ast.parse()` to ensure syntactic correctness before execution.
+
+**Saved To**: `outputs/experiments/<session_id>/experiment_iter_3.py`
+
+### Step 3: Execution (Subprocess)
+
+Location: `src/orchestration/controller.py:294`
+
+The `ExperimentRunner` (src/execution/experiment_runner.py) executes the generated script as a subprocess.
+
+**Execution:**
+```python
+process = subprocess.run(
+    ["python", script_path],
+    capture_output=True,
+    text=True,
+    timeout=600,  # 10 minutes
+)
+```
+
+**Output Parsing**: The script's final line is JSON:
+```json
+{"metrics": {"rmse": 0.1332, ...}, "success": true}
+```
+
+**Error Handling**: If the script fails (non-zero exit code, timeout, or invalid JSON), the runner creates an `ExperimentResult` with `success=False` and captures the error message.
+
+**Result**: An `ExperimentResult` object (src/orchestration/state.py:70):
+```python
+ExperimentResult(
+    experiment_name="xgboost_tuned_learning_rate",
+    iteration=3,
+    model_type="XGBRegressor",
+    model_params={"n_estimators": 200, "learning_rate": 0.05, "max_depth": 6},
+    metrics={"rmse": 0.1332, "mae": 0.0987, "r2": 0.8654},
+    execution_time=12.4,
+    success=True,
+)
+```
+
+<Note>
+**Graceful Failure**: If an experiment fails, the loop **continues** to the next iteration. Failed experiments are logged with `success=False` and error messages.
+</Note>
+
+### Step 4: Results Analysis (Gemini)
+
+Location: `src/orchestration/controller.py:315`
+
+The `ResultsAnalyzer` (src/cognitive/results_analyzer.py:84) analyzes the experiment result.
+
+**Local Computation (No Gemini):**
+- Metric comparison: current vs baseline, best, previous
+- Percentage changes: `(baseline - current) / baseline * 100`
+- Trend detection: improving, degrading, plateau, fluctuating (last 3 experiments)
+- Best model tracking: update if current > best
+
+**Gemini Analysis (with conversation history):**
+- **Input**: Current result + metric comparison + last 5 experiments
+- **Task**: Generate 3-5 key observations explaining **why** the result occurred
+- **Output**:
+```json
+{
+  "key_observations": [
+    "XGBoost with lower learning rate (0.05) outperformed iteration 2's 0.1 by 10.3%",
+    "Log transformation of target variable remains critical — iteration 1 without it had RMSE 2x worse",
+    "Tree-based models (iterations 2-3) consistently outperform linear models (iteration 0)",
+    "Diminishing returns observed — improvement from iteration 2 to 3 is only 2.1%"
+  ],
+  "reasoning": "The lower learning rate prevented overfitting while increased n_estimators maintained model capacity. However, we may be approaching the limit of this dataset's predictability."
+}
+```
+
+**Result**: An `AnalysisResult` object (src/orchestration/state.py:152) with:
+- `primary_metric`: MetricComparison with all percentage changes
+- `trend_pattern`: TrendPattern enum (IMPROVING, PLATEAU, etc.)
+- `key_observations`: List of 3-5 strings
+- `reasoning`: Gemini's detailed explanation
+
+### Step 5: Hypothesis Generation (Gemini)
+
+Location: `src/orchestration/controller.py:322`
+
+The `HypothesisGenerator` (src/cognitive/hypothesis_generator.py:79) generates 2-3 ranked hypotheses for the next iteration.
+
+**Input to Gemini:**
+- Analysis result (observations, trend, metric comparison)
+- Last 5 experiments from history
+- Current iteration number / max iterations
+- Iterations without improvement count
+- User constraints
+
+**Strategy Guidance**: The prompt includes adaptive hints:
+- If `trend == "plateau"` or `iteration > 70% of max`: "Consider more exploratory hypotheses"
+- If `trend == "improving"` and early: "Balance refining current approach with trying alternatives"
+- Default: "Balance exploration and exploitation"
+
+**Output**:
+```json
+{
+  "analysis_summary": "XGBoost shows strong performance but diminishing returns suggest we're near optimal for this approach",
+  "exploration_vs_exploitation": "balanced",
+  "hypotheses": [
+    {
+      "hypothesis_id": "h1",
+      "statement": "Fine-tune XGBoost regularization (alpha/lambda) to squeeze out remaining 1-2% improvement",
+      "rationale": "Current model shows slight overfitting based on train/test gap",
+      "suggested_model": "XGBRegressor",
+      "suggested_params": {"reg_alpha": 0.5, "reg_lambda": 1.0},
+      "confidence_score": 0.72,
+      "priority": 1
+    },
+    {
+      "hypothesis_id": "h2",
+      "statement": "Try LightGBM as alternative gradient booster with better handling of categorical features",
+      "rationale": "LightGBM often matches XGBoost performance with faster training",
+      "suggested_model": "LGBMRegressor",
+      "confidence_score": 0.65,
+      "priority": 2
+    }
+  ],
+  "reasoning": "Focus on exploitation (h1) since we have a strong baseline, but keep one exploratory option (h2) in case LightGBM surprises us."
+}
+```
+
+**Result**: A `HypothesisSet` object (src/orchestration/state.py:177) with ranked hypotheses.
+
+<Tip>
+The **top hypothesis** (priority=1) is automatically fed back into the next iteration's design constraints (src/orchestration/controller.py:337). This creates a hypothesis → experiment → analysis → new hypothesis feedback loop.
+</Tip>
+
+### Step 6: Termination Check
+
+Location: `src/orchestration/controller.py:143`
+
+After each iteration, the system checks if it should stop (src/orchestration/state.py:251):
+
+```python
+should_stop, reason = self.state.should_terminate()
+if should_stop:
+    self.state.termination_reason = reason
+    self.state.phase = ExperimentPhase.COMPLETED
+    break
+```
+
+**Termination Criteria** (evaluated in order):
+
+1. **Max Iterations**: `current_iteration >= max_iterations` (default: 20)
+2. **Time Budget**: `elapsed_time > time_budget` (default: 3600s)
+3. **Plateau**: `iterations_without_improvement >= plateau_threshold` (default: 3)
+4. **Target Achieved**: `best_metric >= target_metric_value` (from constraints)
+5. **Agent Recommendation**: `agent_recommends_stop == True` (not currently used)
+
+If none are met, the loop continues to the next iteration (back to Step 1).
+
+---
+
+## Phase 4: Report Generation
+
+Location: `src/orchestration/controller.py:406`
+
+After the loop terminates, the `ReportGenerator` (src/cognitive/report_generator.py:86) creates a final Markdown report.
+
+### Report Structure
+
+1. **Executive Summary** (Gemini-generated): 1 paragraph summarizing the session
+2. **Dataset Overview** (local): Table with data profile statistics
+3. **Methodology** (Gemini-generated): 2-3 paragraphs explaining the approach
+4. **Experiment Results** (local): Table with all experiments and metrics
+5. **Best Model** (local): Detailed breakdown of the best model's hyperparameters and metrics
+6. **Key Insights** (Gemini-generated): 3-5 bullet points with observations
+7. **Visualizations** (local): Embedded PNG charts (metric progression, model comparison, improvement)
+8. **Recommendations** (Gemini-generated): 3-5 bullet points for future work
+9. **Appendix** (local): Detailed per-experiment logs
+
+### Example Report Snippet
+
+```markdown
+# ML Experiment Report: california_housing
+
+## Executive Summary
+
+This report summarizes an automated ML experiment session on the California Housing dataset for regression. A total of 20 experiments were conducted (18 successful), optimizing for RMSE. The best performing model was xgboost_tuned_regularization with RMSE = 0.1289. This represents an 82.4% improvement over the baseline LinearRegression model.
+
+## Best Model
+
+**Model**: XGBRegressor
+**Experiment**: xgboost_tuned_regularization
+**Iteration**: 17
+**Primary Metric (rmse)**: 0.128943
+
+**All Metrics**:
+| Metric | Value |
+|--------|-------|
+| mae | 0.0876 |
+| r2 | 0.8854 |
+| rmse | 0.1289 |
+
+**Hyperparameters**:
+| Parameter | Value |
+|-----------|-------|
+| learning_rate | 0.05 |
+| max_depth | 6 |
+| n_estimators | 200 |
+| reg_alpha | 0.5 |
+```
+
+**Saved To**: `outputs/reports/report_california_housing_20260302_143022.md`
+
+---
+
+## State Management and Resumability
+
+Location: `src/orchestration/controller.py:454`
+
+After each major phase (profiling, baseline, each iteration), the complete `ExperimentState` is saved to JSON:
+
+```python
+def save_state(self):
+    state_path = self.output_dir / f"state_{self.state.session_id}.json"
+    self.state.save(state_path)
+```
+
+### State Contents
+
+The saved state includes (src/orchestration/state.py:194):
+- Session ID, config, phase
+- Data profile
+- **All experiment results** (every iteration)
+- Best metric and experiment name
+- Iterations without improvement count
+- Start time, elapsed time
+- Gemini conversation history (optional)
+- Termination reason
+
+### Resuming a Session
+
+If the process crashes or is interrupted (`Ctrl+C`), you can resume:
+
+```bash
+python -m src.main run \
+  --resume outputs/state_a3f9c2d1.json \
+  --verbose
+```
+
+The controller loads the state (src/orchestration/controller.py:94) and continues from the last saved phase.
+
+<Note>
+Gemini conversation history is **not** saved to the state file (to reduce file size). Resumed sessions start with a fresh conversation, but all experiment results are preserved.
+</Note>
+
+---
+
+## Real-World Example: 20-Iteration Session
+
+Here's what a typical session looks like:
+
+```
+[Phase 1: Data Profiling]
+✓ Profiled 20,640 rows × 9 columns
+✓ Target: MedHouseVal (continuous, right-skewed)
+✓ Primary metric: rmse
+
+[Phase 2: Baseline]
+Iteration 0: baseline
+  Model: LinearRegression
+  RMSE: 0.7343 ← baseline
+
+[Phase 3: Iteration Loop]
+Iteration 1: random_forest_initial
+  Model: RandomForestRegressor
+  RMSE: 0.2456 (66.5% better than baseline) ← new best
+
+Iteration 2: log_transform_target
+  Model: RandomForestRegressor
+  RMSE: 0.1421 (42.2% better than iteration 1) ← new best
+
+Iteration 3: xgboost_initial
+  Model: XGBRegressor
+  RMSE: 0.1332 (6.3% better than iteration 2) ← new best
+
+... iterations 4-16 ...
+
+Iteration 17: xgboost_tuned_regularization
+  Model: XGBRegressor
+  RMSE: 0.1289 (3.2% better than previous best) ← new best
+
+Iteration 18: lightgbm_alternative
+  Model: LGBMRegressor
+  RMSE: 0.1301 (no improvement)
+
+Iteration 19: xgboost_final_tuning
+  Model: XGBRegressor
+  RMSE: 0.1291 (no improvement)
+
+Iteration 20: ensemble_stacking
+  Model: StackingRegressor
+  RMSE: 0.1288 (0.08% better) ← marginal, diminishing returns
+
+✓ Termination: Maximum iterations reached
+
+[Phase 4: Finalization]
+✓ Best model: xgboost_tuned_regularization (RMSE: 0.1289)
+✓ Generated 3 visualizations
+✓ Report saved: outputs/reports/report_california_housing_20260302_143022.md
+✓ MLflow tracking: mlflow ui --backend-store-uri file:./outputs/mlruns
+```
+
+---
+
+## Key Takeaways
+
+1. **Fully Autonomous**: Once started, the loop runs without human intervention
+2. **Hypothesis-Driven**: Every experiment tests a specific hypothesis generated by Gemini
+3. **Adaptive**: Each iteration builds on all previous iterations via Thought Signatures
+4. **Resilient**: Failed experiments don't stop the loop; state is saved for crash recovery
+5. **Observable**: Rich console output, MLflow tracking, JSON state files, final report
+6. **Intelligent Termination**: Stops when plateau detected, not just max iterations
+
+<Tip>
+Run with `--verbose` to see Gemini's full reasoning at each step. You'll see how it references previous iterations and builds increasingly sophisticated hypotheses.
+</Tip>

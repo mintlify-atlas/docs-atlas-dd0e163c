@@ -1,0 +1,322 @@
+---
+title: Running Experiments
+description: Guide to running experiments effectively with ML Experiment Autopilot
+---
+
+## Overview
+
+ML Experiment Autopilot autonomously designs, executes, and iterates on machine learning experiments using Gemini 3. This guide covers how to run experiments effectively, from basic usage to advanced configurations.
+
+## Basic Usage
+
+<Steps>
+  <Step title="Prepare Your Dataset">
+    Ensure your dataset is in CSV or Parquet format with a clearly defined target column.
+
+    ```bash
+    # Example dataset structure
+    data/
+    └── my_dataset.csv  # Must have headers and a target column
+    ```
+  </Step>
+
+  <Step title="Set Up API Key">
+    Configure your Gemini API key in the `.env` file:
+
+    ```bash
+    cp .env.example .env
+    # Edit .env and add:
+    GEMINI_API_KEY=your_actual_key_here
+    ```
+
+    Get a free API key from [Google AI Studio](https://aistudio.google.com/apikey). Tier 1 or higher is recommended for better rate limits.
+  </Step>
+
+  <Step title="Run Your First Experiment">
+    Use the `run` command with required arguments:
+
+    ```bash
+    python -m src.main run \
+      --data data/sample/california_housing.csv \
+      --target MedHouseVal \
+      --task regression \
+      --max-iterations 5 \
+      --verbose
+    ```
+
+    <Note>
+      Always run as a module using `python -m src.main` to avoid import errors.
+    </Note>
+  </Step>
+</Steps>
+
+## Command-Line Arguments
+
+### Required Arguments
+
+<ParamField path="--data, -d" type="path" required>
+  Path to your dataset (CSV or Parquet file)
+
+  ```bash
+  --data data/sample/california_housing.csv
+  ```
+</ParamField>
+
+<ParamField path="--target, -t" type="string" required>
+  Target column name for prediction (case-sensitive)
+
+  ```bash
+  --target MedHouseVal
+  ```
+</ParamField>
+
+<ParamField path="--task" type="enum" required>
+  Type of ML task: `classification` or `regression`
+
+  ```bash
+  --task regression
+  ```
+</ParamField>
+
+### Optional Arguments
+
+<ParamField path="--constraints, -c" type="path">
+  Path to constraints file (Markdown format) to guide Gemini's decisions
+
+  ```bash
+  --constraints data/sample/constraints.md
+  ```
+</ParamField>
+
+<ParamField path="--max-iterations, -n" type="integer" default="20">
+  Maximum experiment iterations (1-100)
+
+  ```bash
+  --max-iterations 10
+  ```
+</ParamField>
+
+<ParamField path="--time-budget" type="integer" default="3600">
+  Time budget in seconds (60-86400)
+
+  ```bash
+  --time-budget 7200  # 2 hours
+  ```
+</ParamField>
+
+<ParamField path="--output-dir, -o" type="path">
+  Custom output directory (auto-generated if not specified)
+
+  ```bash
+  --output-dir ./my_results
+  ```
+</ParamField>
+
+<ParamField path="--verbose, -v" type="boolean" default="false">
+  Show detailed Gemini reasoning for each iteration
+
+  ```bash
+  --verbose
+  ```
+</ParamField>
+
+<ParamField path="--resume" type="path">
+  Resume from a saved state file (see [Resuming Experiments](/guides/resuming-experiments))
+
+  ```bash
+  --resume outputs/state_a1b2c3d4.json
+  ```
+</ParamField>
+
+## Example: Classification Task
+
+Running a classification experiment on the bank marketing dataset:
+
+```bash
+python -m src.main run \
+  --data data/sample/bank.csv \
+  --target deposit \
+  --task classification \
+  --max-iterations 3 \
+  --verbose
+```
+
+**What happens:**
+1. Data profiling analyzes 11,162 samples
+2. Baseline model (LogisticRegression) establishes performance floor
+3. Gemini designs 3 experiments testing different hypotheses
+4. Each iteration improves on previous results
+5. Final report generated in `outputs/reports/`
+
+## Example: Regression Task
+
+Running a regression experiment on California housing data:
+
+```bash
+python -m src.main run \
+  --data data/sample/california_housing.csv \
+  --target MedHouseVal \
+  --task regression \
+  --constraints data/sample/constraints.md \
+  --max-iterations 5 \
+  --verbose
+```
+
+**What happens:**
+1. Data profiling analyzes 20,640 samples with 8 features
+2. Constraints guide Gemini to prefer tree-based models and RMSE metric
+3. Baseline establishes RMSE ~0.75
+4. Iterations test hypotheses like log transforms, boosting methods
+5. Best model saved with metrics logged to MLflow
+
+## The Experiment Loop
+
+Each iteration follows a structured process defined in `src/orchestration/controller.py:245-328`:
+
+<Steps>
+  <Step title="Experiment Design (ExperimentDesigner)">
+    Gemini analyzes:
+    - Data profile (schema, distributions, missing values)
+    - All previous experiment results
+    - User constraints and top hypotheses
+
+    Outputs a structured `ExperimentSpec` with:
+    - Model type and hyperparameters
+    - Preprocessing configuration
+    - Hypothesis being tested
+    - Reasoning for design choices
+  </Step>
+
+  <Step title="Code Generation (CodeGenerator)">
+    Jinja2 templates generate validated Python scripts:
+    - `outputs/experiments/{session_id}/experiment_{iteration}.py`
+    - Code validated with `ast.parse()` before execution
+    - Supports sklearn, XGBoost, LightGBM models
+  </Step>
+
+  <Step title="Experiment Execution (ExperimentRunner)">
+    Script runs in isolated subprocess:
+    - Timeout: 300 seconds (configurable)
+    - Captures stdout/stderr
+    - Parses JSON metrics output
+    - Handles failures gracefully
+  </Step>
+
+  <Step title="Results Analysis (ResultsAnalyzer)">
+    Gemini compares metrics:
+    - Current vs. baseline (iteration 0)
+    - Current vs. best across all iterations
+    - Current vs. previous iteration
+    - Detects trends: improving, degrading, plateau, fluctuating
+  </Step>
+
+  <Step title="Hypothesis Generation (HypothesisGenerator)">
+    Gemini synthesizes insights into ranked hypotheses:
+    - 1-3 hypotheses per iteration
+    - Confidence scores (0-1)
+    - Priority rankings (1=highest, 3=lowest)
+    - Exploration vs. exploitation strategy
+  </Step>
+
+  <Step title="Termination Check">
+    Loop continues unless:
+    - Max iterations reached (`--max-iterations`)
+    - Time budget exhausted (`--time-budget`)
+    - Performance plateau (3 iterations without 0.5% improvement)
+    - Target metric achieved (via constraints)
+    - Agent recommends stopping
+  </Step>
+</Steps>
+
+## Output Files
+
+All outputs are saved to `outputs/` directory (or custom `--output-dir`):
+
+| Output Type | Location | Description |
+|------------|----------|-------------|
+| **Experiments** | `outputs/experiments/{session_id}/` | Generated Python scripts for each iteration |
+| **Reports** | `outputs/reports/` | Markdown report with full experimental journey |
+| **Plots** | `outputs/plots/` | Metric progression, model comparison charts |
+| **Models** | `outputs/models/` | Serialized best models (if saved) |
+| **MLflow** | `outputs/mlruns/` | MLflow tracking data (metrics, params, artifacts) |
+| **State** | `outputs/state_{session_id}.json` | Session state for resuming |
+
+## Verbose Mode Output
+
+With `--verbose`, you see Gemini's reasoning in real-time:
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║  ITERATION 3 - GEMINI'S REASONING                            ║
+║  Thought Signature Active | Context: 12 turns                ║
+╚══════════════════════════════════════════════════════════════╝
+
+Based on the previous 2 experiments, I've observed that:
+- Tree-based models consistently outperform linear models on this dataset
+- Iteration 2's log-transform hypothesis improved RMSE by 80%
+- Feature distributions suggest boosting may capture residual patterns
+
+For this iteration, I'm testing XGBoost with tuned learning rate
+and max_depth to see if gradient boosting further reduces error...
+```
+
+<Tip>
+  Verbose mode is excellent for understanding Gemini's decision-making process and debugging unexpected results.
+</Tip>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Choose Appropriate Iterations">
+    - **Quick exploration**: 3-5 iterations
+    - **Thorough search**: 10-20 iterations
+    - **Production-ready**: 20-50 iterations with constraints
+
+    More iterations allow Gemini to explore diverse strategies and find better solutions.
+  </Accordion>
+
+  <Accordion title="Set Realistic Time Budgets">
+    - **Small datasets (&lt;10K rows)**: 1800-3600 seconds (30-60 min)
+    - **Medium datasets (10K-100K rows)**: 3600-7200 seconds (1-2 hours)
+    - **Large datasets (&gt;100K rows)**: 7200+ seconds (2+ hours)
+
+    Time budget includes profiling, all iterations, and report generation.
+  </Accordion>
+
+  <Accordion title="Use Constraints Wisely">
+    Constraints guide Gemini without being overly restrictive. See [Custom Constraints](/guides/custom-constraints) for examples.
+
+    Good constraints:
+    - Specify primary metric (RMSE, F1, accuracy)
+    - Suggest model families (tree-based, linear, ensemble)
+    - Define preprocessing preferences
+
+    Avoid:
+    - Overly specific hyperparameters (let Gemini explore)
+    - Contradictory requirements
+  </Accordion>
+
+  <Accordion title="Monitor Resource Usage">
+    Each experiment runs in a subprocess with:
+    - **Timeout**: 300 seconds per experiment (configurable in `src/config.py:54`)
+    - **Memory**: Depends on dataset size and model
+    - **Disk**: Generated code + MLflow artifacts (~10-100 MB per session)
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Understanding Results" icon="chart-line" href="/guides/understanding-results">
+    Learn how to interpret metrics, trends, and analyses
+  </Card>
+  <Card title="MLflow Tracking" icon="flask" href="/guides/mlflow-tracking">
+    View experiments in the MLflow UI
+  </Card>
+  <Card title="Custom Constraints" icon="file-code" href="/guides/custom-constraints">
+    Guide Gemini with natural language preferences
+  </Card>
+  <Card title="Resuming Experiments" icon="play" href="/guides/resuming-experiments">
+    Resume interrupted sessions
+  </Card>
+</CardGroup>

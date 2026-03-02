@@ -1,0 +1,416 @@
+---
+title: Installation
+description: Complete setup and configuration guide for ML Experiment Autopilot.
+---
+
+## System Requirements
+
+### Python Version
+
+- **Python 3.9 or higher** is required
+- Python 3.10 or 3.11 recommended for best performance
+
+Verify your Python version:
+
+```bash
+python3 --version
+```
+
+### Operating System
+
+ML Experiment Autopilot works on all major platforms:
+
+- macOS 10.15+
+- Linux (Ubuntu 20.04+, Debian 10+, CentOS 8+, etc.)
+- Windows 10/11 (with WSL2 recommended for best experience)
+
+### Hardware
+
+- **Minimum**: 4GB RAM, 2 CPU cores
+- **Recommended**: 8GB+ RAM, 4+ CPU cores for larger datasets
+- **Disk Space**: 500MB for installation + space for your datasets and outputs
+
+## Installation Methods
+
+### Method 1: Git Clone (Recommended)
+
+This method gives you access to sample datasets and full project structure.
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/srikar161720/ml-experiment-autopilot.git
+    cd ml-experiment-autopilot
+    ```
+  </Step>
+
+  <Step title="Create virtual environment">
+    Using a virtual environment is strongly recommended to avoid dependency conflicts.
+
+    <CodeGroup>
+    ```bash macOS/Linux
+    python3 -m venv venv
+    source venv/bin/activate
+    ```
+
+    ```bash Windows (PowerShell)
+    python3 -m venv venv
+    .\venv\Scripts\Activate.ps1
+    ```
+
+    ```bash Windows (Command Prompt)
+    python3 -m venv venv
+    venv\Scripts\activate.bat
+    ```
+    </CodeGroup>
+
+    <Note>
+    On Windows, if you get a script execution policy error, run:
+    ```powershell
+    Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+    ```
+    </Note>
+  </Step>
+
+  <Step title="Install dependencies">
+    ```bash
+    pip install --upgrade pip
+    pip install -r requirements.txt
+    ```
+
+    This installs all required packages including:
+    - `google-generativeai>=0.8.0` - Gemini 3 API
+    - `pandas>=2.0.0` - Data manipulation
+    - `numpy>=1.24.0` - Numerical computing
+    - `scikit-learn>=1.3.0` - ML algorithms
+    - `xgboost>=2.0.0` - Gradient boosting
+    - `lightgbm>=4.0.0` - Gradient boosting
+    - `mlflow>=2.10.0` - Experiment tracking
+    - `typer>=0.9.0` - CLI framework
+    - `rich>=13.0.0` - Terminal formatting
+    - `pydantic>=2.0.0` - Data validation
+    - `matplotlib>=3.7.0` - Visualizations
+    - `jinja2>=3.1.0` - Code templating
+    - `python-dotenv>=1.0.0` - Environment management
+  </Step>
+
+  <Step title="Verify installation">
+    ```bash
+    python -m src.main --version
+    ```
+
+    You should see output like:
+    ```
+    ML Experiment Autopilot v0.1.0
+    ```
+  </Step>
+</Steps>
+
+### Method 2: Download ZIP
+
+If you don't have Git installed:
+
+<Steps>
+  <Step title="Download">
+    Download the ZIP file from [GitHub releases](https://github.com/srikar161720/ml-experiment-autopilot/archive/refs/heads/main.zip)
+  </Step>
+
+  <Step title="Extract and navigate">
+    Extract the ZIP file and navigate to the directory:
+    ```bash
+    cd ml-experiment-autopilot-main
+    ```
+  </Step>
+
+  <Step title="Follow steps 2-4 from Method 1">
+    Create virtual environment, install dependencies, and verify installation.
+  </Step>
+</Steps>
+
+## Configuration
+
+### Gemini API Key Setup
+
+<Steps>
+  <Step title="Get your API key">
+    1. Visit [Google AI Studio](https://aistudio.google.com/apikey)
+    2. Sign in with your Google account
+    3. Click "Create API Key"
+    4. Copy the generated key
+
+    <Tip>
+    The free tier provides limited requests per minute. For production use, consider upgrading to Tier 1 or higher to avoid rate limits during long experiments.
+    </Tip>
+  </Step>
+
+  <Step title="Create environment file">
+    Copy the example environment file:
+    ```bash
+    cp .env.example .env
+    ```
+  </Step>
+
+  <Step title="Add your API key">
+    Edit `.env` and replace the placeholder:
+
+    ```bash .env
+    # ML Experiment Autopilot - Environment Variables
+
+    # Gemini API Key (required)
+    GEMINI_API_KEY=AIzaSyD...your_actual_key_here
+
+    # MLflow Tracking URI (optional, defaults to ./outputs/mlruns)
+    # MLFLOW_TRACKING_URI=./outputs/mlruns
+
+    # Logging Level (optional, defaults to INFO)
+    # LOG_LEVEL=INFO
+    ```
+
+    <Warning>
+    **Never commit your `.env` file to version control!** It's already in `.gitignore`, but be careful not to share your API key publicly.
+    </Warning>
+  </Step>
+
+  <Step title="Verify configuration">
+    Test that your API key works:
+    ```bash
+    python -m src.main run \
+      --data data/sample/california_housing.csv \
+      --target MedHouseVal \
+      --task regression \
+      --max-iterations 1
+    ```
+
+    If the API key is invalid, you'll see:
+    ```
+    Error: Invalid Gemini API key. Please check your .env file.
+    ```
+  </Step>
+</Steps>
+
+### Environment Variables Reference
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `GEMINI_API_KEY` | Yes | - | Your Gemini API key from AI Studio |
+| `MLFLOW_TRACKING_URI` | No | `./outputs/mlruns` | MLflow tracking database location |
+| `LOG_LEVEL` | No | `INFO` | Logging verbosity: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+
+## Directory Structure
+
+After installation, your directory will look like:
+
+```
+ml-experiment-autopilot/
+├── src/                          # Source code
+│   ├── main.py                   # CLI entry point
+│   ├── config.py                 # Configuration management
+│   ├── orchestration/            # Experiment controller
+│   ├── cognitive/                # Gemini-powered components
+│   ├── execution/                # Data profiling, code generation, execution
+│   ├── persistence/              # MLflow tracking
+│   └── utils/                    # Display utilities
+├── templates/                    # Jinja2 code templates
+├── tests/                        # Test suite (160 tests)
+├── data/sample/                  # Sample datasets
+│   ├── california_housing.csv
+│   ├── bank.csv
+│   └── constraints.md
+├── outputs/                      # Generated outputs (auto-created)
+│   ├── experiments/              # Generated Python scripts
+│   ├── reports/                  # Markdown reports
+│   ├── plots/                    # Visualizations
+│   ├── models/                   # Saved models
+│   └── mlruns/                   # MLflow tracking data
+├── requirements.txt              # Python dependencies
+├── .env.example                  # Environment template
+├── .env                          # Your configuration (create this)
+└── README.md                     # Project documentation
+```
+
+<Note>
+The `outputs/` directory is automatically created when you run your first experiment. All generated files go here.
+</Note>
+
+## Testing Your Installation
+
+Run the test suite to ensure everything is working:
+
+```bash
+# Run all unit tests (doesn't require API key)
+pytest tests/ -v --ignore=tests/integration
+```
+
+You should see:
+```
+160 tests passed in 12.34s
+```
+
+### Integration Tests
+
+To run integration tests that call the Gemini API:
+
+```bash
+pytest tests/integration/ -v -m integration
+```
+
+<Warning>
+Integration tests require a valid `GEMINI_API_KEY` and will consume API quota.
+</Warning>
+
+## Upgrading
+
+To upgrade to the latest version:
+
+```bash
+cd ml-experiment-autopilot
+git pull origin main
+pip install --upgrade -r requirements.txt
+```
+
+## Uninstallation
+
+<Steps>
+  <Step title="Deactivate virtual environment">
+    ```bash
+    deactivate
+    ```
+  </Step>
+
+  <Step title="Remove project directory">
+    ```bash
+    cd ..
+    rm -rf ml-experiment-autopilot
+    ```
+  </Step>
+</Steps>
+
+## Troubleshooting Installation
+
+### Common Issues
+
+<AccordionGroup>
+  <Accordion title="ModuleNotFoundError: No module named 'src'">
+    **Problem**: Running the script incorrectly.
+
+    **Solution**: Always run as a module:
+    ```bash
+    python -m src.main run ...  # Correct
+    python src/main.py run ...  # Wrong
+    ```
+  </Accordion>
+
+  <Accordion title="pip install fails with compilation errors">
+    **Problem**: Missing build tools for packages like `lightgbm` or `xgboost`.
+
+    **Solution**:
+    
+    **macOS**:
+    ```bash
+    brew install cmake libomp
+    ```
+
+    **Ubuntu/Debian**:
+    ```bash
+    sudo apt-get update
+    sudo apt-get install build-essential cmake
+    ```
+
+    **Windows**: Install [Visual Studio Build Tools](https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022)
+  </Accordion>
+
+  <Accordion title="GEMINI_API_KEY not found error">
+    **Problem**: Environment file not loaded or missing.
+
+    **Solution**:
+    1. Ensure `.env` file exists in project root
+    2. Check that `GEMINI_API_KEY=...` is set (no spaces around `=`)
+    3. Verify you're running from the project root directory
+  </Accordion>
+
+  <Accordion title="SSL certificate verification failed">
+    **Problem**: Corporate firewall or proxy blocking HTTPS.
+
+    **Solution**: Configure proxy in `.env`:
+    ```bash
+    export HTTPS_PROXY=http://proxy.company.com:8080
+    export HTTP_PROXY=http://proxy.company.com:8080
+    ```
+  </Accordion>
+
+  <Accordion title="Python version too old">
+    **Problem**: System Python is < 3.9.
+
+    **Solution**: Install a newer Python:
+    
+    **macOS** (using Homebrew):
+    ```bash
+    brew install python@3.11
+    ```
+
+    **Ubuntu/Debian**:
+    ```bash
+    sudo apt-get install python3.11 python3.11-venv
+    ```
+
+    Then use `python3.11` instead of `python3` in commands.
+  </Accordion>
+</AccordionGroup>
+
+## Docker Installation (Alternative)
+
+For a containerized setup:
+
+```dockerfile Dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+ENV GEMINI_API_KEY=""
+
+CMD ["python", "-m", "src.main"]
+```
+
+Build and run:
+```bash
+docker build -t ml-autopilot .
+docker run -e GEMINI_API_KEY=your_key -v $(pwd)/outputs:/app/outputs ml-autopilot run --data data/sample/california_housing.csv --target MedHouseVal --task regression
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card
+    title="Quickstart Guide"
+    icon="rocket"
+    href="/quickstart"
+  >
+    Run your first experiment
+  </Card>
+  <Card
+    title="CLI Reference"
+    icon="terminal"
+    href="/cli/overview"
+  >
+    Complete command-line documentation
+  </Card>
+  <Card
+    title="Configuration"
+    icon="gear"
+    href="/installation"
+  >
+    Advanced configuration options
+  </Card>
+  <Card
+    title="Architecture"
+    icon="diagram-project"
+    href="/concepts/architecture"
+  >
+    Understand how the system works
+  </Card>
+</CardGroup>

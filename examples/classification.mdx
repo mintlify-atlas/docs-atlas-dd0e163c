@@ -1,0 +1,360 @@
+---
+title: 'Classification Example'
+description: 'Complete classification example using the Bank Marketing dataset'
+---
+
+This guide demonstrates a complete classification workflow using the Bank Marketing dataset (11,162 samples).
+
+## Dataset Overview
+
+The Bank Marketing dataset contains information about direct marketing campaigns (phone calls) of a Portuguese banking institution.
+
+**Features:**
+- **Demographics**: `age`, `job`, `marital`, `education`
+- **Financial**: `default`, `balance`, `housing`, `loan`
+- **Campaign**: `contact`, `day`, `month`, `duration`, `campaign`
+- **Previous campaigns**: `pdays`, `previous`, `poutcome`
+
+**Target:**
+- `deposit`: Whether the client subscribed to a term deposit (`yes` / `no`)
+
+**Size:** 11,162 rows
+
+**Challenge:** This is an imbalanced classification problem with more "no" than "yes" responses.
+
+## Basic Usage
+
+Run a classification experiment with default settings:
+
+```bash
+python -m src.main run \
+  --data data/sample/bank.csv \
+  --target deposit \
+  --task classification \
+  --max-iterations 3 \
+  --verbose
+```
+
+### What Happens
+
+1. **Data Profiling**: Analyzes schema, categorical features, class distribution
+2. **Baseline Model**: Trains Logistic Regression to establish baseline accuracy
+3. **Iteration Loop**: Gemini designs experiments considering class imbalance
+4. **Report Generation**: Creates narrative report with classification insights
+
+### Expected Output
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║  DATA PROFILE                                                ║
+╚══════════════════════════════════════════════════════════════╝
+
+Dataset: bank.csv
+Rows: 11,162 | Columns: 17
+Task: classification
+
+Target Distribution:
+  no:  9,629 (86.3%)
+  yes: 1,533 (13.7%)
+
+⚠ Class imbalance detected (ratio: 6.3:1)
+
+Features:
+  Categorical: 10 (job, marital, education, default, housing, ...)
+  Numerical: 7 (age, balance, duration, campaign, pdays, ...)
+  Missing values: 0
+
+╔══════════════════════════════════════════════════════════════╗
+║  ITERATION 1 - GEMINI'S REASONING                            ║
+║  Thought Signature Active | Context: 4 turns                 ║
+╚══════════════════════════════════════════════════════════════╝
+
+Based on the data profile, I observe:
+- Significant class imbalance (86.3% "no" vs 13.7% "yes")
+- Mix of categorical and numerical features
+- "duration" may be a strong predictor
+
+For this iteration, I'm testing Random Forest with class weights
+to handle the imbalance...
+
+┌─────────────────────────────────────────────────────────────┐
+│ RESULTS ANALYSIS                                            │
+├─────────────────────────────────────────────────────────────┤
+│ Trend: IMPROVING                                            │
+│ F1-Score: 0.4523   ★ NEW BEST                               │
+│ Accuracy: 0.8912                                            │
+│ Precision: 0.6234 | Recall: 0.3521                          │
+│                                                             │
+│ Key Observations:                                           │
+│   - Class weights improved minority class recall            │
+│   - Tree-based model handles mixed feature types well       │
+│   - Precision-recall tradeoff evident                       │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## With Classification Constraints
+
+Optimize for specific classification metrics:
+
+<Tabs>
+  <Tab title="Command">
+    ```bash
+    python -m src.main run \
+      --data data/sample/bank.csv \
+      --target deposit \
+      --task classification \
+      --constraints constraints_classification.md \
+      --max-iterations 5 \
+      --verbose
+    ```
+  </Tab>
+  <Tab title="constraints_classification.md">
+    ```markdown
+    # Classification Constraints
+
+    ## Metrics
+    - Primary metric: F1-score
+    - Minimize false negatives (maximize recall for "yes" class)
+
+    ## Models
+    - Prefer ensemble methods
+    - Use class weights to handle imbalance
+
+    ## Preprocessing
+    - One-hot encode categorical variables
+    - Scale numerical features
+
+    ## Class Imbalance
+    - Apply SMOTE or class weights
+    - Prioritize recall over precision
+
+    ## Termination
+    - Stop if F1-score > 0.50
+    - Or no improvement for 3 iterations
+    ```
+  </Tab>
+  <Tab title="Precision-Focused">
+    ```markdown
+    # Precision-Focused Constraints
+
+    ## Metrics
+    - Primary metric: Precision
+    - Minimize false positives
+
+    ## Models
+    - Prefer boosting methods
+    - Tune decision threshold
+
+    ## Class Imbalance
+    - Use class weights
+    - Consider threshold optimization
+
+    ## Termination
+    - Stop if precision > 0.70
+    ```
+  </Tab>
+</Tabs>
+
+### Impact of Constraints
+
+With F1-focused constraints, Gemini will:
+- Balance precision and recall optimization
+- Apply techniques like SMOTE or class weights
+- Test different decision thresholds
+- Focus on ensemble methods
+
+## Advanced Configuration
+
+<Tabs>
+  <Tab title="Handle Imbalance">
+    ```markdown
+    # Imbalance-Aware Constraints
+
+    ## Class Imbalance Strategy
+    - Use SMOTE for oversampling minority class
+    - Apply class_weight='balanced' for all models
+    - Consider ensemble methods
+
+    ## Metrics
+    - Primary: F1-score
+    - Secondary: ROC-AUC
+    - Report precision and recall separately
+
+    ## Models
+    - XGBClassifier with scale_pos_weight
+    - RandomForest with class_weight
+    - LGBMClassifier with is_unbalance=True
+    ```
+  </Tab>
+  <Tab title="Feature Engineering">
+    ```markdown
+    # Feature Engineering Constraints
+
+    ## Feature Engineering
+    - Create interaction features between campaign variables
+    - Bin age into categories
+    - Create "previous_contact" binary feature
+
+    ## Feature Selection
+    - Use feature importance from tree models
+    - Consider correlation analysis
+
+    ## Models
+    - Prefer models with built-in feature selection
+    ```
+  </Tab>
+  <Tab title="Cross-Validation">
+    ```markdown
+    # Robust Evaluation Constraints
+
+    ## Validation Strategy
+    - Use stratified 5-fold cross-validation
+    - Report mean and std of metrics
+
+    ## Metrics
+    - Primary: F1-score (mean)
+    - Report ROC-AUC
+    - Show confusion matrix
+
+    ## Models
+    - Test multiple random seeds
+    - Ensure reproducibility
+    ```
+  </Tab>
+</Tabs>
+
+## Interpreting Classification Results
+
+### Confusion Matrix
+
+The final report includes a confusion matrix:
+
+```
+                 Predicted
+                 No    Yes
+Actual   No    8,234   145
+         Yes     856   677
+```
+
+**Interpretation:**
+- **True Negatives (8,234)**: Correctly predicted "no"
+- **False Positives (145)**: Predicted "yes" but actual "no"
+- **False Negatives (856)**: Predicted "no" but actual "yes" (costly!)
+- **True Positives (677)**: Correctly predicted "yes"
+
+### Key Metrics
+
+```markdown
+## Best Model
+
+**Model**: XGBClassifier
+**F1-Score**: 0.5234
+**Accuracy**: 0.8923
+**Precision**: 0.6521
+**Recall**: 0.4412
+**ROC-AUC**: 0.8456
+
+### Hyperparameters
+- n_estimators: 200
+- max_depth: 5
+- learning_rate: 0.05
+- scale_pos_weight: 6.3
+- subsample: 0.8
+
+### Preprocessing
+- Categorical encoding: One-hot
+- Feature scaling: StandardScaler
+- Class imbalance: scale_pos_weight
+```
+
+### Metric Definitions
+
+| Metric | Formula | Interpretation |
+|--------|---------|----------------|
+| **Accuracy** | (TP + TN) / Total | Overall correctness (misleading with imbalance) |
+| **Precision** | TP / (TP + FP) | Of predicted "yes", how many are correct? |
+| **Recall** | TP / (TP + FN) | Of actual "yes", how many did we catch? |
+| **F1-Score** | 2 × (P × R) / (P + R) | Harmonic mean of precision and recall |
+| **ROC-AUC** | Area under ROC curve | Overall discrimination ability |
+
+### Feature Importance
+
+Gemini's analysis typically reveals:
+
+```markdown
+### Top 5 Features
+1. **duration** (0.352) - Call duration is the strongest predictor
+2. **poutcome** (0.128) - Previous campaign outcome matters
+3. **month** (0.095) - Seasonality affects response
+4. **balance** (0.082) - Account balance correlates with subscription
+5. **age** (0.071) - Age influences decision-making
+```
+
+## Common Results
+
+Typical progression for this dataset:
+
+| Iteration | Model | F1-Score | Precision | Recall | Strategy |
+|-----------|-------|----------|-----------|--------|----------|
+| Baseline | LogisticRegression | 0.3421 | 0.5234 | 0.2567 | Baseline |
+| 1 | RandomForest | 0.4523 | 0.6234 | 0.3521 | Class weights |
+| 2 | XGBClassifier | 0.5012 | 0.6432 | 0.4098 | scale_pos_weight |
+| 3 | XGBClassifier + tuning | 0.5234 | 0.6521 | 0.4412 | Hyperparameter opt |
+| 4 | LGBMClassifier | 0.5156 | 0.6289 | 0.4378 | Alternative booster |
+| 5 | Ensemble | 0.5312 | 0.6678 | 0.4456 | Voting classifier |
+
+### Why These Results?
+
+- **Class imbalance is challenging**: Only 13.7% positive class
+- **Duration is strong predictor**: But may not be available before call
+- **Boosting handles imbalance well**: XGBoost and LightGBM with class weights
+- **F1-score around 0.50-0.53**: Typical for this dataset with proper handling
+- **Precision-recall tradeoff**: Can tune threshold based on business needs
+
+## Threshold Optimization
+
+For classification, you can optimize the decision threshold:
+
+```markdown
+## Threshold Analysis
+
+| Threshold | Precision | Recall | F1-Score | Use Case |
+|-----------|-----------|--------|----------|----------|
+| 0.3 | 0.4512 | 0.6234 | 0.5234 | Maximize reach |
+| 0.5 | 0.6521 | 0.4412 | 0.5234 | Balanced (default) |
+| 0.7 | 0.7834 | 0.2891 | 0.4234 | High confidence |
+
+**Recommendation**: Use threshold 0.4 to balance cost of false negatives 
+vs. campaign efficiency.
+```
+
+## Viewing Results in MLflow
+
+```bash
+mlflow ui --backend-store-uri file:./outputs/mlruns
+# Open http://127.0.0.1:5000
+```
+
+In MLflow, you can:
+- Compare F1-scores across iterations
+- View confusion matrices
+- Analyze precision-recall curves
+- Download classification reports
+- Compare feature importance across models
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Regression Example" icon="chart-line" href="/examples/regression">
+    Learn about regression experiments
+  </Card>
+  <Card title="Advanced Constraints" icon="sliders" href="/examples/advanced-constraints">
+    Complex constraint configurations
+  </Card>
+  <Card title="Metrics" icon="gauge" href="/guides/understanding-results">
+    Understanding evaluation metrics
+  </Card>
+  <Card title="Class Imbalance" icon="scale-balanced" href="/examples/classification">
+    Handling imbalanced datasets
+  </Card>
+</CardGroup>

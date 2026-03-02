@@ -1,0 +1,510 @@
+---
+title: Custom Constraints
+description: Writing custom constraint files to guide Gemini's experiment design decisions
+---
+
+## Overview
+
+Constraints files allow you to guide ML Experiment Autopilot's decisions using natural language. Gemini interprets these preferences when designing experiments, selecting models, and choosing preprocessing strategies.
+
+## Why Use Constraints?
+
+Without constraints, the autopilot explores broadly across model families and preprocessing options. Constraints help you:
+
+- **Focus search space**: Prefer specific model families (tree-based, linear, neural networks)
+- **Define success criteria**: Specify primary metrics and target values
+- **Guide preprocessing**: Suggest transformations based on domain knowledge
+- **Control termination**: Set stopping conditions beyond default thresholds
+- **Incorporate expertise**: Apply domain-specific best practices
+
+<Tip>
+  Constraints are **preferences, not hard rules**. Gemini may deviate if it identifies better strategies.
+</Tip>
+
+## File Format
+
+Constraints are written in Markdown format. The file structure is flexible—Gemini parses natural language, not strict schemas.
+
+### Basic Structure
+
+```markdown
+# Experiment Constraints
+
+## Metrics
+- Primary metric: RMSE
+
+## Models
+- Prefer tree-based models
+- Prefer boosting methods
+
+## Preprocessing
+- Log-transform the target variable
+- Use median imputation for missing values
+
+## Termination
+- Stop if no improvement for 3 iterations
+```
+
+<Note>
+  Save constraints as `.md` files and reference with `--constraints path/to/file.md`.
+</Note>
+
+## Constraint Categories
+
+### Metrics
+
+Define the primary metric and optimization direction:
+
+```markdown
+## Metrics
+- Primary metric: RMSE
+- Minimize RMSE (lower is better)
+```
+
+```markdown
+## Metrics
+- Primary metric: F1 score
+- Optimize for F1 over accuracy (imbalanced dataset)
+- Secondary metrics: precision, recall
+```
+
+**Supported metrics**:
+- **Regression**: `RMSE`, `MAE`, `R²`, `MSE`
+- **Classification**: `accuracy`, `F1`, `precision`, `recall`, `ROC AUC`
+
+<Info>
+  The ExperimentDesigner (in `src/cognitive/experiment_designer.py`) parses this section to set `state.config.primary_metric`.
+</Info>
+
+### Models
+
+Guide model family selection:
+
+```markdown
+## Models
+- Prefer tree-based models (RandomForest, XGBoost, LightGBM)
+- Avoid linear models (dataset has non-linear patterns)
+- Start with ensemble methods
+```
+
+```markdown
+## Models
+- Only use scikit-learn models (no XGBoost/LightGBM)
+- Prefer interpretable models (LogisticRegression, DecisionTree)
+- Fast training required (limit to n_estimators < 100)
+```
+
+**Available models** (from `src/execution/code_generator.py`):
+- **scikit-learn**: LinearRegression, LogisticRegression, RandomForest, GradientBoosting, SVM, KNeighbors
+- **XGBoost**: XGBRegressor, XGBClassifier
+- **LightGBM**: LGBMRegressor, LGBMClassifier
+
+### Preprocessing
+
+Specify data preprocessing preferences:
+
+```markdown
+## Preprocessing
+- Log-transform the target variable (right-skewed distribution)
+- Use median imputation for missing values (robust to outliers)
+- Standard scaling for numeric features
+- One-hot encoding for categorical features
+```
+
+```markdown
+## Preprocessing
+- Do NOT transform the target variable
+- Drop rows with missing values (only 2% missing)
+- Min-max scaling to [0, 1] range
+- Ordinal encoding for categorical features (natural ordering)
+```
+
+**Preprocessing options** (defined in `src/orchestration/state.py:48-54`):
+
+<ParamField path="missing_values" type="enum">
+  `drop`, `mean`, `median`, `mode`, `constant`
+
+  ```markdown
+  - Median imputation for numeric features
+  - Mode imputation for categorical features
+  ```
+</ParamField>
+
+<ParamField path="scaling" type="enum">
+  `standard`, `minmax`, `none`
+
+  ```markdown
+  - Standard scaling (zero mean, unit variance)
+  ```
+</ParamField>
+
+<ParamField path="encoding" type="enum">
+  `onehot`, `ordinal`
+
+  ```markdown
+  - One-hot encoding for all categorical features
+  ```
+</ParamField>
+
+<ParamField path="target_transform" type="enum">
+  `log`, `sqrt`, `none`
+
+  ```markdown
+  - Log-transform target to reduce skewness
+  ```
+</ParamField>
+
+### Termination
+
+Define custom stopping conditions:
+
+```markdown
+## Termination
+- Stop if no improvement for 3 iterations
+- Target RMSE: 0.15 (stop if achieved)
+- Maximum 10 iterations (computational budget)
+```
+
+```markdown
+## Termination
+- Continue until 20 iterations (thorough search)
+- Ignore plateaus (exploring diverse strategies)
+- Stop if F1 > 0.85
+```
+
+**Default termination criteria** (from `src/orchestration/state.py:251-283`):
+- Max iterations: 20 (override with `--max-iterations`)
+- Time budget: 3600 seconds (override with `--time-budget`)
+- Plateau: 3 iterations without 0.5% improvement
+- Agent recommendation: Gemini suggests stopping
+
+### Experiment Strategy
+
+High-level guidance for the experimental approach:
+
+```markdown
+## Strategy
+- Explore diverse model families in first 5 iterations
+- Then exploit best-performing approach
+- Prioritize generalization over training performance
+```
+
+```markdown
+## Strategy
+- Focus on interpretability (business requirement)
+- Avoid black-box models (XGBoost, neural networks)
+- Prefer simpler models with similar performance
+```
+
+## Complete Examples
+
+### Example 1: Regression with Domain Knowledge
+
+```markdown
+# California Housing Price Prediction Constraints
+
+## Metrics
+- Primary metric: RMSE
+- Also track MAE for interpretability
+
+## Models
+- Prefer tree-based models (capture non-linear relationships)
+- Try boosting methods (XGBoost, LightGBM, GradientBoosting)
+- Avoid linear models (preliminary EDA shows non-linearity)
+
+## Preprocessing
+- Log-transform the target variable MedHouseVal (right-skewed distribution)
+- Use median imputation for missing values in total_bedrooms (207 missing)
+- Standard scaling for all numeric features
+- No categorical features in this dataset
+
+## Hyperparameters
+- Limit tree depth to avoid overfitting (max_depth <= 10)
+- Use conservative learning rates (0.01 - 0.1)
+
+## Termination
+- Stop if no improvement for 3 iterations
+- Target RMSE: 0.20 or better
+- Maximum 15 iterations
+
+## Notes
+- Dataset has 20,640 samples, sufficient for complex models
+- Focus on generalization (avoid overfitting to training set)
+```
+
+**Usage**:
+```bash
+python -m src.main run \
+  --data data/sample/california_housing.csv \
+  --target MedHouseVal \
+  --task regression \
+  --constraints examples/housing_constraints.md \
+  --max-iterations 15 \
+  --verbose
+```
+
+### Example 2: Imbalanced Classification
+
+```markdown
+# Bank Marketing Classification Constraints
+
+## Metrics
+- Primary metric: F1 score (imbalanced dataset: 11.7% positive class)
+- Also track precision and recall separately
+- Accuracy is misleading (do not optimize for accuracy alone)
+
+## Models
+- Prefer models that handle imbalance well:
+  - LogisticRegression with class_weight='balanced'
+  - RandomForestClassifier with balanced class weights
+  - GradientBoostingClassifier
+- Avoid naive models that predict majority class
+
+## Preprocessing
+- Do NOT transform the target (binary classification)
+- Mean imputation for numeric features (minimal missing values)
+- One-hot encoding for categorical features (age_group, job, marital, etc.)
+- Standard scaling for numeric features
+
+## Class Imbalance
+- Address 8:1 class imbalance
+- Consider SMOTE or class weights
+- Evaluate on both classes, not just majority
+
+## Hyperparameters
+- Use class_weight='balanced' where supported
+- Avoid high complexity (prevents overfitting to minority class noise)
+
+## Termination
+- Stop if F1 > 0.65 (good performance on imbalanced data)
+- Stop if no improvement for 4 iterations
+- Maximum 12 iterations
+
+## Notes
+- Precision important (avoid false positives in marketing)
+- Recall important (capture potential customers)
+- Balance via F1 score optimization
+```
+
+### Example 3: Fast Iteration for Exploration
+
+```markdown
+# Quick Exploration Constraints
+
+## Metrics
+- Primary metric: R² (quick assessment)
+
+## Models
+- Fast-training models only:
+  - LinearRegression
+  - Ridge
+  - Lasso
+  - RandomForest with n_estimators <= 50
+- Skip slow models (SVM, large XGBoost ensembles)
+
+## Preprocessing
+- Simple preprocessing (speed over sophistication):
+  - Mean imputation
+  - Standard scaling
+  - One-hot encoding
+- No target transformations
+
+## Termination
+- Maximum 5 iterations (quick sweep)
+- No plateau detection (explore diversity)
+
+## Strategy
+- Prioritize exploration over exploitation
+- Test diverse approaches quickly
+- Use results to inform deeper investigation later
+```
+
+## How Constraints Are Used
+
+Constraints flow through the system as follows (from `src/orchestration/controller.py:330-366`):
+
+<Steps>
+  <Step title="Constraint Parsing">
+    The `ExperimentDesigner.parse_constraints()` method reads the Markdown file and extracts key preferences.
+  </Step>
+
+  <Step title="Primary Metric Selection">
+    `ExperimentDesigner.select_primary_metric()` determines the primary metric from constraints or defaults:
+    - Regression: `rmse`
+    - Classification: `f1` (imbalanced) or `accuracy` (balanced)
+  </Step>
+
+  <Step title="Hypothesis Context Injection">
+    Top-ranked hypothesis from the previous iteration is appended to constraints:
+
+    ```markdown
+    ## Current Top Hypothesis
+    - Statement: Fine-tune XGBoost regularization to reduce overfitting
+    - Rationale: XGBoost shows best performance; alpha/lambda tuning may help
+    - Confidence: 0.72
+    - Suggested model: XGBRegressor
+    - Suggested params: {"alpha": 0.1, "lambda": 1.0}
+    ```
+  </Step>
+
+  <Step title="Experiment Design">
+    Gemini receives:
+    - Original user constraints
+    - Hypothesis context from previous iteration
+    - Data profile
+    - All previous results
+
+    Uses all inputs to design the next experiment.
+  </Step>
+</Steps>
+
+## Writing Effective Constraints
+
+<AccordionGroup>
+  <Accordion title="Be Specific but Flexible">
+    **Good**:
+    ```markdown
+    - Prefer tree-based models for non-linear relationships
+    - Try XGBoost and LightGBM with tuned learning rates
+    ```
+
+    **Too Vague**:
+    ```markdown
+    - Use good models
+    - Make it work well
+    ```
+
+    **Too Rigid**:
+    ```markdown
+    - Only use XGBRegressor with max_depth=5, learning_rate=0.05, n_estimators=100
+    - Never deviate from these exact parameters
+    ```
+
+    <Tip>
+      Provide rationale for preferences. Gemini considers "why" when deciding whether to follow or deviate.
+    </Tip>
+  </Accordion>
+
+  <Accordion title="Include Domain Knowledge">
+    ```markdown
+    ## Domain Knowledge
+    - Target variable (house prices) is right-skewed → log transformation likely helps
+    - Features have different scales (income vs. age) → scaling important
+    - Missing values in total_bedrooms are not random → median imputation reasonable
+    - Non-linear price relationships observed in EDA → prefer non-linear models
+    ```
+
+    Domain expertise guides Gemini toward effective strategies faster.
+  </Accordion>
+
+  <Accordion title="Balance Exploration and Exploitation">
+    **Early iterations**: Encourage exploration
+    ```markdown
+    - First 5 iterations: explore diverse model families
+    - Test both linear and non-linear approaches
+    - Try different preprocessing combinations
+    ```
+
+    **Later iterations**: Encourage exploitation
+    ```markdown
+    - After identifying best model family, focus on hyperparameter tuning
+    - Exploit successful preprocessing choices
+    ```
+
+    Gemini's `HypothesisGenerator` automatically balances exploration/exploitation, but you can nudge it.
+  </Accordion>
+
+  <Accordion title="Set Realistic Targets">
+    **Realistic**:
+    ```markdown
+    - Target RMSE: 0.15 (10% better than baseline)
+    ```
+
+    **Unrealistic**:
+    ```markdown
+    - Target RMSE: 0.001 (baseline is 0.75)
+    ```
+
+    Unrealistic targets may cause premature stopping or endless iterations.
+  </Accordion>
+</AccordionGroup>
+
+## Constraints vs. CLI Arguments
+
+Some settings can be specified via both constraints and CLI arguments:
+
+| Setting | Constraint File | CLI Argument | Priority |
+|---------|----------------|--------------|----------|
+| Max iterations | `Maximum 10 iterations` | `--max-iterations 10` | **CLI wins** |
+| Time budget | `Time limit: 2 hours` | `--time-budget 7200` | **CLI wins** |
+| Primary metric | `Primary metric: RMSE` | (automatic) | **Constraint wins** |
+| Plateau threshold | `Stop after 5 no-improvement iterations` | (default: 3) | **Constraint influences** |
+
+<Warning>
+  CLI arguments override constraints for hard limits (iterations, time). Constraints guide Gemini's decisions but don't override system configuration.
+</Warning>
+
+## Sample Constraint Files
+
+The repository includes sample constraints at `data/sample/constraints.md`:
+
+```bash
+data/sample/
+├── california_housing.csv
+├── bank.csv
+└── constraints.md          # Sample constraints for regression
+```
+
+View the file:
+```bash
+cat data/sample/constraints.md
+```
+
+## Debugging Constraints
+
+If Gemini ignores your constraints:
+
+<Steps>
+  <Step title="Check Constraint Parsing">
+    Run with `--verbose` to see Gemini's reasoning:
+
+    ```bash
+    python -m src.main run ... --verbose
+    ```
+
+    Look for mentions of your constraints in the reasoning output.
+  </Step>
+
+  <Step title="Review Constraint Clarity">
+    Ensure constraints are unambiguous:
+    - "Prefer tree-based models" ✓
+    - "Maybe try some trees" ✗
+  </Step>
+
+  <Step title="Check for Contradictions">
+    ```markdown
+    - Use simple models
+    - Maximize accuracy above all else
+    ```
+    Contradictory goals may confuse Gemini. Prioritize clearly.
+  </Step>
+
+  <Step title="Verify Constraint Path">
+    Ensure `--constraints` points to correct file:
+    ```bash
+    --constraints data/sample/constraints.md  # Correct
+    --constraints constraints.md              # May fail if not in current dir
+    ```
+  </Step>
+</Steps>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Running Experiments" icon="rocket" href="/guides/running-experiments">
+    Use constraints in experiment runs
+  </Card>
+  <Card title="Understanding Results" icon="chart-line" href="/guides/understanding-results">
+    See how constraints influenced decisions
+  </Card>
+</CardGroup>

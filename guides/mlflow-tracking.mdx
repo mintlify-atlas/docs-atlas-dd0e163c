@@ -1,0 +1,505 @@
+---
+title: MLflow Tracking
+description: Using MLflow UI to view and analyze experiment runs from ML Experiment Autopilot
+---
+
+## Overview
+
+ML Experiment Autopilot automatically logs all experiments to MLflow, providing a web UI for exploring metrics, parameters, and artifacts. This guide covers how to launch and navigate the MLflow interface.
+
+## Quick Start
+
+<Steps>
+  <Step title="Run Experiments">
+    Complete at least one experiment run:
+
+    ```bash
+    python -m src.main run \
+      --data data/sample/california_housing.csv \
+      --target MedHouseVal \
+      --task regression \
+      --max-iterations 3
+    ```
+  </Step>
+
+  <Step title="Launch MLflow UI">
+    Start the MLflow server with the correct backend URI:
+
+    ```bash
+    mlflow ui --backend-store-uri file:./outputs/mlruns
+    ```
+
+    <Warning>
+      The `--backend-store-uri` flag is required! Without it, MLflow looks in the default `./mlruns` directory and shows no experiments.
+    </Warning>
+  </Step>
+
+  <Step title="Open in Browser">
+    Navigate to the local server:
+
+    ```
+    http://127.0.0.1:5000
+    ```
+
+    You should see your experiments listed by name: `autopilot_{dataset}_{session_id}`
+  </Step>
+</Steps>
+
+## MLflow Storage Location
+
+All tracking data is stored locally in the `outputs/mlruns/` directory (defined in `src/config.py:22`):
+
+```
+outputs/
+└── mlruns/
+    ├── 0/                          # Default experiment (metadata)
+    ├── 1/                          # autopilot_california_housing_a1b2c3d4
+    │   ├── meta.yaml
+    │   ├── {run_id}/               # Individual run directories
+    │   │   ├── meta.yaml           # Run metadata
+    │   │   ├── metrics/            # Metric values (RMSE, R², etc.)
+    │   │   ├── params/             # Parameters (model_type, hyperparams)
+    │   │   ├── tags/               # Tags (hypothesis, success)
+    │   │   └── artifacts/          # Code, plots, reasoning.txt
+    └── ...
+```
+
+<Note>
+  Each experiment session creates a new MLflow experiment. Multiple runs are logged within each experiment.
+</Note>
+
+## What Gets Logged
+
+The `MLflowTracker` (defined in `src/persistence/mlflow_tracker.py`) logs comprehensive data for each iteration:
+
+### Parameters
+
+Logged in `log_experiment()` at `src/persistence/mlflow_tracker.py:103-112`:
+
+<ParamField path="model_type" type="string">
+  Model class name (e.g., `XGBRegressor`, `RandomForestClassifier`)
+</ParamField>
+
+<ParamField path="iteration" type="integer">
+  Iteration number (0 = baseline)
+</ParamField>
+
+<ParamField path="model_{param}" type="any">
+  All model hyperparameters with `model_` prefix:
+  - `model_max_depth`: 5
+  - `model_learning_rate`: 0.05
+  - `model_n_estimators`: 100
+</ParamField>
+
+<ParamField path="preprocessing_*" type="string">
+  Preprocessing configuration:
+  - `preprocessing_missing`: "median"
+  - `preprocessing_scaling`: "standard"
+  - `preprocessing_encoding`: "onehot"
+</ParamField>
+
+### Metrics
+
+Logged in `log_experiment()` at `src/persistence/mlflow_tracker.py:114-120`:
+
+<ResponseField name="Task-Specific Metrics" type="dict">
+  All metrics from the experiment result:
+
+  **Regression**: `rmse`, `mae`, `r2`
+
+  **Classification**: `accuracy`, `f1`, `precision`, `recall`, `roc_auc`
+</ResponseField>
+
+<ResponseField name="execution_time" type="float">
+  Time in seconds to train and evaluate the model
+</ResponseField>
+
+<ResponseField name="success" type="integer">
+  1 if experiment succeeded, 0 if failed
+</ResponseField>
+
+### Tags
+
+Logged in `log_experiment()` at `src/persistence/mlflow_tracker.py:122-126`:
+
+<ResponseField name="hypothesis" type="string">
+  The hypothesis being tested (truncated to 250 chars)
+</ResponseField>
+
+<ResponseField name="success" type="string">
+  "True" or "False" string representation
+</ResponseField>
+
+### Artifacts
+
+Logged files attached to each run:
+
+| Artifact | Path | Description |
+|----------|------|-------------|
+| **reasoning.txt** | `artifacts/reasoning.txt` | Gemini's reasoning for experiment design |
+| **experiment_{N}.py** | `artifacts/experiment_{N}.py` | Generated Python training script |
+| **error.txt** | `artifacts/error.txt` | Error message if experiment failed |
+| **visualizations** | `artifacts/*.png` | Charts (final_summary run only) |
+
+## Navigating the MLflow UI
+
+### Experiments List
+
+The home page shows all experiments:
+
+```
+Experiments
+├── autopilot_california_housing_a1b2c3d4  (5 runs)
+├── autopilot_bank_b2c3d4e5               (3 runs)
+└── Default                                (0 runs)
+```
+
+Click an experiment name to view its runs.
+
+### Runs Table
+
+The runs table displays all iterations:
+
+| Run Name | Start Time | Duration | rmse | r2 | success |
+|----------|-----------|----------|------|----|---------|
+| data_profile | 2026-03-02 10:00:00 | 2s | - | - | - |
+| baseline | 2026-03-02 10:00:05 | 8s | 0.7456 | 0.6012 | 1 |
+| log_transform_rf | 2026-03-02 10:00:15 | 12s | 0.4201 | 0.7834 | 1 |
+| xgboost_tuned | 2026-03-02 10:00:30 | 15s | 0.1332 | 0.8456 | 1 |
+| final_summary | 2026-03-02 10:00:50 | 1s | - | - | - |
+
+<Tip>
+  Click column headers to sort by any metric. Use the search bar to filter runs.
+</Tip>
+
+### Special Runs
+
+<ResponseField name="data_profile" type="run">
+  Logged at the start of each session (in `log_data_profile()` at `src/persistence/mlflow_tracker.py:60-91`).
+
+  **Parameters**:
+  - `n_rows`, `n_columns`
+  - `n_numeric_features`, `n_categorical_features`
+  - `target_column`, `target_type`
+
+  **Metrics**:
+  - `total_missing_values`
+
+  **Artifacts**:
+  - `data_profile.json` — Full data profile
+</ResponseField>
+
+<ResponseField name="final_summary" type="run">
+  Logged at the end of each session (in `log_final_summary()` at `src/persistence/mlflow_tracker.py:151-185`).
+
+  **Metrics**:
+  - `total_iterations`
+  - `successful_experiments`
+  - `total_time_seconds`
+  - `best_metric`
+
+  **Tags**:
+  - `best_experiment`
+  - `termination_reason`
+  - `phase`
+
+  **Artifacts**:
+  - `final_state.json` — Complete experiment state
+  - Visualization plots (`*.png`)
+</ResponseField>
+
+### Run Detail View
+
+Click any run name to view detailed information:
+
+<Tabs>
+  <Tab title="Overview">
+    High-level run information:
+    - Run ID and name
+    - Start time and duration
+    - User and source
+  </Tab>
+
+  <Tab title="Parameters">
+    All logged parameters in key-value format:
+
+    ```
+    model_type: XGBRegressor
+    iteration: 3
+    model_max_depth: 5
+    model_learning_rate: 0.05
+    model_n_estimators: 100
+    preprocessing_missing: median
+    preprocessing_scaling: standard
+    ```
+  </Tab>
+
+  <Tab title="Metrics">
+    All logged metrics with values:
+
+    ```
+    rmse: 0.1332
+    mae: 0.0891
+    r2: 0.8456
+    execution_time: 15.2
+    success: 1.0
+    ```
+  </Tab>
+
+  <Tab title="Tags">
+    Tagged metadata:
+
+    ```
+    hypothesis: "XGBoost with regularization to reduce overfitting"
+    success: "True"
+    ```
+  </Tab>
+
+  <Tab title="Artifacts">
+    Downloadable files:
+    - `reasoning.txt` — Click to view or download
+    - `experiment_3.py` — Generated training script
+
+    Click any artifact to preview or download.
+  </Tab>
+</Tabs>
+
+## Comparing Runs
+
+<Steps>
+  <Step title="Select Runs">
+    Check the boxes next to 2+ runs you want to compare.
+  </Step>
+
+  <Step title="Click Compare">
+    Click the "Compare" button at the top of the runs table.
+  </Step>
+
+  <Step title="View Comparison">
+    MLflow displays:
+    - **Parallel Coordinates Plot**: Visualize parameter vs. metric relationships
+    - **Scatter Plot**: Plot any two metrics against each other
+    - **Contour Plot**: For hyperparameter tuning analysis
+    - **Table View**: Side-by-side parameter and metric comparison
+  </Step>
+</Steps>
+
+### Example Comparison
+
+Comparing iterations 1, 2, and 3:
+
+| Run | model_type | model_max_depth | rmse | r2 |
+|-----|-----------|----------------|------|----|
+| log_transform_rf | RandomForestRegressor | 10 | 0.4201 | 0.7834 |
+| xgboost_initial | XGBRegressor | 3 | 0.3567 | 0.8123 |
+| xgboost_tuned | XGBRegressor | 5 | 0.1332 | 0.8456 |
+
+**Insights**:
+- Deeper trees (max_depth 5 vs 3) improved XGBoost performance
+- XGBoost outperforms RandomForest on this dataset
+- RMSE reduced by 68% from iteration 1 to 3
+
+## Searching and Filtering
+
+### Filter by Metric
+
+Use the search bar with MLflow's query syntax:
+
+```sql
+-- Runs with RMSE < 0.2
+metrics.rmse < 0.2
+
+-- Successful runs only
+metrics.success = 1
+
+-- Runs with high R²
+metrics.r2 > 0.8
+
+-- Combine conditions
+metrics.rmse < 0.2 AND metrics.r2 > 0.8
+```
+
+### Filter by Parameter
+
+```sql
+-- Only XGBoost models
+params.model_type = "XGBRegressor"
+
+-- Max depth between 3 and 5
+params.model_max_depth >= "3" AND params.model_max_depth <= "5"
+```
+
+<Note>
+  Parameters are stored as strings in MLflow. Use string comparisons even for numeric values.
+</Note>
+
+### Filter by Tag
+
+```sql
+-- Successful experiments
+tags.success = "True"
+
+-- Specific hypothesis (partial match)
+tags.hypothesis LIKE "%regularization%"
+```
+
+## Downloading Artifacts
+
+<Steps>
+  <Step title="Navigate to Run">
+    Click a run name to open the detail view.
+  </Step>
+
+  <Step title="Open Artifacts Tab">
+    Select the "Artifacts" tab.
+  </Step>
+
+  <Step title="Download Files">
+    - Click any file to preview in browser
+    - Right-click → "Save As" to download
+    - Download entire artifact directory as ZIP
+  </Step>
+</Steps>
+
+### Useful Artifacts
+
+<AccordionGroup>
+  <Accordion title="reasoning.txt">
+    Gemini's full reasoning for designing the experiment:
+
+    ```
+    Based on the previous experiments, I've observed that tree-based
+    models outperform linear models by 40%. The data profile shows
+    right-skewed target distribution, suggesting log transformation.
+
+    For this iteration, I'm testing RandomForestRegressor with:
+    - n_estimators: 100 (balance between performance and speed)
+    - max_depth: 10 (prevent overfitting observed in deeper trees)
+    - Log-transformed target (hypothesis: reduce skew impact)
+    ```
+  </Accordion>
+
+  <Accordion title="experiment_{N}.py">
+    The generated Python script that was executed:
+
+    ```python
+    import pandas as pd
+    from sklearn.ensemble import RandomForestRegressor
+    from sklearn.model_selection import train_test_split
+    from sklearn.metrics import mean_squared_error, r2_score
+    import numpy as np
+    import json
+
+    # Load data
+    data = pd.read_csv("data/sample/california_housing.csv")
+    # ... (full training script)
+    ```
+
+    Useful for:
+    - Reproducing results manually
+    - Debugging preprocessing steps
+    - Understanding exact model configuration
+  </Accordion>
+
+  <Accordion title="data_profile.json">
+    Complete dataset analysis from the data_profile run:
+
+    ```json
+    {
+      "n_rows": 20640,
+      "n_columns": 9,
+      "numeric_columns": ["MedInc", "HouseAge", ...],
+      "missing_values": {"total_bedrooms": 207},
+      "numeric_stats": {
+        "MedInc": {"mean": 3.87, "std": 1.90, ...}
+      }
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Programmatic Access
+
+Query MLflow data programmatically using the `MLflowTracker` API:
+
+```python
+from src.persistence.mlflow_tracker import MLflowTracker
+
+# Create tracker
+tracker = MLflowTracker(
+    experiment_name="autopilot_california_housing_a1b2c3d4",
+    tracking_uri="file:./outputs/mlruns"
+)
+
+# Get best run by RMSE (lower is better)
+best_run = tracker.get_best_run(metric_name="rmse", ascending=True)
+print(best_run)
+# {
+#   "run_id": "abc123",
+#   "run_name": "xgboost_tuned",
+#   "metrics": {"rmse": 0.1332, "r2": 0.8456},
+#   "params": {"model_type": "XGBRegressor", ...}
+# }
+
+# Get all runs
+all_runs = tracker.get_all_runs()
+for run in all_runs:
+    print(f"{run['run_name']}: RMSE={run['metrics'].get('rmse', 'N/A')}")
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="No experiments appear in MLflow UI">
+    **Cause**: Incorrect `--backend-store-uri`
+
+    **Solution**:
+    ```bash
+    # Correct command
+    mlflow ui --backend-store-uri file:./outputs/mlruns
+
+    # Run from project root directory
+    cd /path/to/ml-experiment-autopilot
+    mlflow ui --backend-store-uri file:./outputs/mlruns
+    ```
+  </Accordion>
+
+  <Accordion title="Port 5000 already in use">
+    **Cause**: Another process using port 5000
+
+    **Solution**: Specify a different port
+    ```bash
+    mlflow ui --backend-store-uri file:./outputs/mlruns --port 5001
+    # Open http://127.0.0.1:5001
+    ```
+  </Accordion>
+
+  <Accordion title="Runs missing metrics">
+    **Cause**: Experiment failed before metrics logged
+
+    **Solution**: Check `success` metric:
+    - Filter for `metrics.success = 0`
+    - Download `error.txt` artifact to see failure reason
+    - Check `outputs/experiments/{session_id}/` for generated code
+  </Accordion>
+
+  <Accordion title="MLflow UI is slow">
+    **Cause**: Large number of runs in experiment
+
+    **Solution**:
+    - Use search filters to reduce visible runs
+    - Archive old experiments (move directories out of `mlruns/`)
+    - Consider upgrading to SQLite/PostgreSQL backend for production
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Understanding Results" icon="chart-line" href="/guides/understanding-results">
+    Interpret metrics and analysis outputs
+  </Card>
+  <Card title="Troubleshooting" icon="wrench" href="/guides/troubleshooting">
+    Resolve common issues
+  </Card>
+</CardGroup>

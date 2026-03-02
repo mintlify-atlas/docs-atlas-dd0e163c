@@ -1,0 +1,638 @@
+---
+title: State Management
+description: Pydantic models for experiment state tracking and persistence
+---
+
+## Overview
+
+The state management system uses Pydantic models to provide type-safe, validated tracking of all experiment data. All state is serializable to JSON for persistence and resumption.
+
+## Core Models
+
+### ExperimentState
+
+The root state model that tracks the entire experiment session.
+
+```python
+from src.orchestration.state import ExperimentState, create_initial_state
+
+# Create new state
+state = create_initial_state(
+    data_path="data.csv",
+    target_column="target",
+    task_type="classification",
+    constraints="Use interpretable models",
+    max_iterations=20,
+    time_budget=3600
+)
+
+# Save state
+state.save(Path("state.json"))
+
+# Load state
+state = ExperimentState.load(Path("state.json"))
+```
+
+<ParamField path="session_id" type="str">
+  Unique identifier (8-char UUID prefix). Auto-generated.
+</ParamField>
+
+<ParamField path="config" type="ExperimentConfig">
+  Experiment configuration settings
+</ParamField>
+
+<ParamField path="data_profile" type="Optional[DataProfile]">
+  Dataset profile from DataProfiler
+</ParamField>
+
+<ParamField path="experiments" type="list[ExperimentResult]">
+  List of all experiment results
+</ParamField>
+
+<ParamField path="current_iteration" type="int">
+  Current iteration number (0-based)
+</ParamField>
+
+<ParamField path="phase" type="ExperimentPhase">
+  Current phase of execution
+</ParamField>
+
+<ParamField path="best_metric" type="Optional[float]">
+  Best metric value achieved so far
+</ParamField>
+
+<ParamField path="best_experiment" type="Optional[str]">
+  Name of best-performing experiment
+</ParamField>
+
+<ParamField path="iterations_without_improvement" type="int">
+  Count for plateau detection
+</ParamField>
+
+<ParamField path="start_time" type="float">
+  Unix timestamp of session start
+</ParamField>
+
+<ParamField path="gemini_conversation_history" type="list[ConversationEntry]">
+  Full Gemini conversation for context
+</ParamField>
+
+<ParamField path="termination_reason" type="Optional[str]">
+  Why the experiment stopped
+</ParamField>
+
+#### Methods
+
+**add_experiment(result: ExperimentResult)**
+
+Add an experiment result and update tracking.
+
+```python
+state.add_experiment(result)
+# Automatically:
+# - Increments current_iteration
+# - Updates best_metric and best_experiment if improved
+# - Tracks iterations_without_improvement
+```
+
+**should_terminate() -> tuple[bool, str]**
+
+Check if experiment loop should stop.
+
+```python
+should_stop, reason = state.should_terminate()
+if should_stop:
+    print(f"Stopping: {reason}")
+```
+
+Returns `True` if:
+- Max iterations reached
+- Time budget exhausted
+- Plateau detected (3+ iterations without improvement)
+- Target metric achieved
+- Agent recommends stopping
+
+**get_elapsed_time() -> float**
+
+Get elapsed time in seconds.
+
+```python
+elapsed = state.get_elapsed_time()
+print(f"Running for {elapsed:.1f}s")
+```
+
+**get_summary() -> dict**
+
+Get summary of current state.
+
+```python
+summary = state.get_summary()
+# {
+#   'session_id': 'abc123',
+#   'phase': 'experiment_design',
+#   'current_iteration': 5,
+#   'max_iterations': 20,
+#   'elapsed_time': 450.3,
+#   'best_metric': 0.876,
+#   'best_experiment': 'rf_tuned',
+#   'total_experiments': 6,
+#   'successful_experiments': 5
+# }
+```
+
+**save(path: Path)**
+
+Save state to JSON file.
+
+```python
+state.save(Path("state_abc123.json"))
+```
+
+**load(path: Path) -> ExperimentState** (classmethod)
+
+Load state from JSON file.
+
+```python
+state = ExperimentState.load(Path("state_abc123.json"))
+```
+
+### ExperimentConfig
+
+Configuration for the experiment session.
+
+```python
+from src.orchestration.state import ExperimentConfig, TaskType
+
+config = ExperimentConfig(
+    data_path="data/housing.csv",
+    target_column="price",
+    task_type=TaskType.REGRESSION,
+    constraints="Focus on linear models",
+    max_iterations=15,
+    time_budget=1800,
+    plateau_threshold=3,
+    improvement_threshold=0.005,
+    target_metric_value=0.85,
+    primary_metric="rmse"
+)
+```
+
+<ResponseField name="data_path" type="str">
+  Path to dataset file
+</ResponseField>
+
+<ResponseField name="target_column" type="str">
+  Name of target column
+</ResponseField>
+
+<ResponseField name="task_type" type="TaskType">
+  CLASSIFICATION or REGRESSION
+</ResponseField>
+
+<ResponseField name="constraints" type="Optional[str]">
+  Natural language constraints
+</ResponseField>
+
+<ResponseField name="max_iterations" type="int">
+  Maximum iterations (default: 20)
+</ResponseField>
+
+<ResponseField name="time_budget" type="int">
+  Time budget in seconds (default: 3600)
+</ResponseField>
+
+<ResponseField name="plateau_threshold" type="int">
+  Iterations without improvement before stopping (default: 3)
+</ResponseField>
+
+<ResponseField name="improvement_threshold" type="float">
+  Minimum relative improvement to count as progress (default: 0.005 = 0.5%)
+</ResponseField>
+
+<ResponseField name="target_metric_value" type="Optional[float]">
+  Target metric to achieve (stops when reached)
+</ResponseField>
+
+<ResponseField name="primary_metric" type="Optional[str]">
+  Primary metric to optimize (e.g., "rmse", "f1", "accuracy")
+</ResponseField>
+
+### ExperimentResult
+
+Results from a single experiment run.
+
+```python
+from src.orchestration.state import ExperimentResult, PreprocessingConfig
+
+result = ExperimentResult(
+    experiment_name="rf_baseline",
+    iteration=1,
+    model_type="RandomForestClassifier",
+    model_params={"n_estimators": 100, "max_depth": 10},
+    preprocessing=PreprocessingConfig(),
+    metrics={"accuracy": 0.87, "f1": 0.85},
+    hypothesis="Random forest will handle non-linear patterns",
+    reasoning="Data shows complex interactions",
+    execution_time=45.3,
+    success=True,
+    code_path="experiments/rf_baseline.py"
+)
+```
+
+<ResponseField name="experiment_name" type="str">
+  Unique experiment identifier
+</ResponseField>
+
+<ResponseField name="iteration" type="int">
+  Iteration number
+</ResponseField>
+
+<ResponseField name="model_type" type="str">
+  sklearn model class name
+</ResponseField>
+
+<ResponseField name="model_params" type="dict[str, Any]">
+  Model hyperparameters
+</ResponseField>
+
+<ResponseField name="preprocessing" type="PreprocessingConfig">
+  Preprocessing configuration
+</ResponseField>
+
+<ResponseField name="metrics" type="dict[str, float]">
+  Performance metrics
+</ResponseField>
+
+<ResponseField name="hypothesis" type="str">
+  Hypothesis tested
+</ResponseField>
+
+<ResponseField name="reasoning" type="str">
+  Design reasoning
+</ResponseField>
+
+<ResponseField name="execution_time" type="float">
+  Wall clock time in seconds
+</ResponseField>
+
+<ResponseField name="success" type="bool">
+  Whether experiment succeeded
+</ResponseField>
+
+<ResponseField name="error_message" type="Optional[str]">
+  Error message if failed
+</ResponseField>
+
+<ResponseField name="code_path" type="Optional[str]">
+  Path to generated script
+</ResponseField>
+
+<ResponseField name="timestamp" type="datetime">
+  When experiment ran
+</ResponseField>
+
+#### Methods
+
+**get_primary_metric(metric_name: str) -> Optional[float]**
+
+```python
+rmse = result.get_primary_metric("rmse")
+if rmse is not None:
+    print(f"RMSE: {rmse:.4f}")
+```
+
+### ExperimentSpec
+
+Specification for designing an experiment.
+
+```python
+from src.orchestration.state import ExperimentSpec, PreprocessingConfig
+
+spec = ExperimentSpec(
+    experiment_name="xgb_tuned",
+    hypothesis="XGBoost with depth limit will reduce overfitting",
+    model_type="XGBClassifier",
+    model_params={
+        "n_estimators": 200,
+        "max_depth": 6,
+        "learning_rate": 0.05
+    },
+    preprocessing=PreprocessingConfig(
+        missing_values="median",
+        scaling="standard",
+        encoding="onehot"
+    ),
+    reasoning="Previous deep trees showed overfitting on validation set"
+)
+```
+
+<ResponseField name="experiment_name" type="str">
+  Unique name for this experiment
+</ResponseField>
+
+<ResponseField name="hypothesis" type="str">
+  Testable hypothesis
+</ResponseField>
+
+<ResponseField name="model_type" type="str">
+  sklearn/xgboost/lightgbm model class
+</ResponseField>
+
+<ResponseField name="model_params" type="dict[str, Any]">
+  Hyperparameter dictionary
+</ResponseField>
+
+<ResponseField name="preprocessing" type="PreprocessingConfig">
+  Data preprocessing settings
+</ResponseField>
+
+<ResponseField name="reasoning" type="str">
+  Why this experiment was designed
+</ResponseField>
+
+### PreprocessingConfig
+
+Configuration for data preprocessing.
+
+```python
+from src.orchestration.state import PreprocessingConfig
+
+preproc = PreprocessingConfig(
+    missing_values="median",
+    scaling="standard",
+    encoding="onehot",
+    target_transform="log"
+)
+```
+
+<ResponseField name="missing_values" type="str">
+  Strategy: `'drop'`, `'mean'`, `'median'`, `'mode'`, `'constant'`
+</ResponseField>
+
+<ResponseField name="scaling" type="str">
+  Scaling: `'standard'`, `'minmax'`, `'none'`
+</ResponseField>
+
+<ResponseField name="encoding" type="str">
+  Categorical encoding: `'onehot'`, `'ordinal'`
+</ResponseField>
+
+<ResponseField name="target_transform" type="Optional[str]">
+  Target transformation: `'log'`, `'none'`, or None
+</ResponseField>
+
+### DataProfile
+
+Comprehensive dataset profile.
+
+```python
+from src.orchestration.state import DataProfile
+
+profile = DataProfile(
+    n_rows=1000,
+    n_columns=15,
+    columns=["age", "income", "target"],
+    column_types={"age": "int64", "income": "float64"},
+    numeric_columns=["age", "income"],
+    categorical_columns=["city", "category"],
+    target_column="target",
+    target_type="categorical",
+    missing_values={"age": 10, "income": 5},
+    missing_percentages={"age": 1.0, "income": 0.5},
+    numeric_stats={...},
+    categorical_stats={...},
+    target_stats={...}
+)
+```
+
+See [DataProfiler API](/api/data-profiler) for detailed field descriptions.
+
+## Analysis Models
+
+### AnalysisResult
+
+Analysis of experiment results.
+
+```python
+from src.orchestration.state import AnalysisResult, MetricComparison, TrendPattern
+
+analysis = AnalysisResult(
+    experiment_name="xgb_tuned",
+    iteration=5,
+    success=True,
+    primary_metric=MetricComparison(
+        metric_name="rmse",
+        current_value=4500.0,
+        baseline_value=6000.0,
+        best_value=4500.0,
+        change_from_baseline_pct=-25.0,
+        is_improvement=True,
+        is_new_best=True
+    ),
+    trend_pattern=TrendPattern.IMPROVING,
+    key_observations=[
+        "New best RMSE achieved",
+        "25% improvement over baseline",
+        "Consistent improvement trend"
+    ],
+    reasoning="XGBoost depth limiting successfully reduced overfitting"
+)
+```
+
+<ResponseField name="experiment_name" type="str">
+  Experiment being analyzed
+</ResponseField>
+
+<ResponseField name="iteration" type="int">
+  Iteration number
+</ResponseField>
+
+<ResponseField name="success" type="bool">
+  Whether experiment succeeded
+</ResponseField>
+
+<ResponseField name="primary_metric" type="Optional[MetricComparison]">
+  Detailed metric comparison
+</ResponseField>
+
+<ResponseField name="trend_pattern" type="TrendPattern">
+  Detected trend: IMPROVING, DEGRADING, PLATEAU, FLUCTUATING, INITIAL
+</ResponseField>
+
+<ResponseField name="key_observations" type="list[str]">
+  Important insights
+</ResponseField>
+
+<ResponseField name="reasoning" type="str">
+  Detailed analysis reasoning
+</ResponseField>
+
+### HypothesisSet
+
+Set of hypotheses for next iteration.
+
+```python
+from src.orchestration.state import HypothesisSet, Hypothesis
+
+hypotheses = HypothesisSet(
+    iteration=6,
+    analysis_summary="XGBoost achieved best results, try further tuning",
+    hypotheses=[
+        Hypothesis(
+            hypothesis_id="h1",
+            statement="Lower learning rate will improve generalization",
+            rationale="Current model may be learning too fast",
+            suggested_model="XGBClassifier",
+            suggested_params={"learning_rate": 0.01, "n_estimators": 500},
+            confidence_score=0.85,
+            priority=1
+        ),
+        Hypothesis(
+            hypothesis_id="h2",
+            statement="Feature engineering will help linear models",
+            rationale="Linear models underperformed, may need feature interactions",
+            suggested_model="LogisticRegression",
+            confidence_score=0.60,
+            priority=2
+        )
+    ],
+    exploration_vs_exploitation="exploit",
+    reasoning="Focus on tuning XGBoost since it's clearly best"
+)
+
+# Get top hypothesis
+top = hypotheses.get_top_hypothesis()
+print(top.statement)
+```
+
+<ResponseField name="iteration" type="int">
+  Iteration these hypotheses are for
+</ResponseField>
+
+<ResponseField name="analysis_summary" type="str">
+  Summary of what led to these hypotheses
+</ResponseField>
+
+<ResponseField name="hypotheses" type="list[Hypothesis]">
+  List of testable hypotheses
+</ResponseField>
+
+<ResponseField name="exploration_vs_exploitation" type="str">
+  Strategy: `'explore'`, `'exploit'`, `'balanced'`
+</ResponseField>
+
+<ResponseField name="reasoning" type="str">
+  Why these hypotheses were generated
+</ResponseField>
+
+## Enums
+
+### TaskType
+
+```python
+from src.orchestration.state import TaskType
+
+TaskType.CLASSIFICATION  # "classification"
+TaskType.REGRESSION      # "regression"
+```
+
+### ExperimentPhase
+
+```python
+from src.orchestration.state import ExperimentPhase
+
+ExperimentPhase.INITIALIZING
+ExperimentPhase.DATA_PROFILING
+ExperimentPhase.BASELINE_MODELING
+ExperimentPhase.EXPERIMENT_DESIGN
+ExperimentPhase.CODE_GENERATION
+ExperimentPhase.EXPERIMENT_EXECUTION
+ExperimentPhase.RESULTS_ANALYSIS
+ExperimentPhase.HYPOTHESIS_GENERATION
+ExperimentPhase.REPORT_GENERATION
+ExperimentPhase.COMPLETED
+ExperimentPhase.FAILED
+```
+
+### TrendPattern
+
+```python
+from src.orchestration.state import TrendPattern
+
+TrendPattern.IMPROVING     # Metrics getting better
+TrendPattern.DEGRADING     # Metrics getting worse
+TrendPattern.PLATEAU       # No significant change
+TrendPattern.FLUCTUATING   # Unstable performance
+TrendPattern.INITIAL       # Not enough data
+```
+
+## Helper Functions
+
+### create_initial_state()
+
+Create a new experiment state.
+
+```python
+from src.orchestration.state import create_initial_state
+
+state = create_initial_state(
+    data_path="data.csv",
+    target_column="target",
+    task_type="classification",
+    constraints="Use interpretable models",
+    max_iterations=20,
+    time_budget=3600,
+    output_dir="outputs/"
+)
+```
+
+## Complete Example
+
+```python
+from pathlib import Path
+from src.orchestration.state import (
+    create_initial_state,
+    ExperimentResult,
+    PreprocessingConfig
+)
+
+# Create initial state
+state = create_initial_state(
+    data_path="housing.csv",
+    target_column="price",
+    task_type="regression",
+    max_iterations=10,
+    time_budget=1800
+)
+
+# Add baseline experiment
+baseline = ExperimentResult(
+    experiment_name="baseline",
+    iteration=0,
+    model_type="LinearRegression",
+    metrics={"rmse": 6000, "r2": 0.65},
+    success=True,
+    execution_time=10.5
+)
+state.add_experiment(baseline)
+
+print(f"Best RMSE: {state.best_metric}")
+print(f"Best experiment: {state.best_experiment}")
+
+# Check termination
+should_stop, reason = state.should_terminate()
+if not should_stop:
+    # Continue with next iteration
+    pass
+
+# Save state
+state.save(Path("state.json"))
+
+# Later: load and resume
+resumed_state = ExperimentState.load(Path("state.json"))
+print(f"Resuming from iteration {resumed_state.current_iteration}")
+```
+
+## Source Location
+
+`~/workspace/source/src/orchestration/state.py`

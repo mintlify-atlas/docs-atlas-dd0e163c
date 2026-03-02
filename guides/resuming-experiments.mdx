@@ -1,0 +1,588 @@
+---
+title: Resuming Experiments
+description: How to resume interrupted experiment sessions with ML Experiment Autopilot
+---
+
+## Overview
+
+ML Experiment Autopilot automatically saves session state throughout execution. If an experiment is interrupted (Ctrl+C, system crash, timeout), you can resume from the last saved checkpoint without losing progress.
+
+## How State Saving Works
+
+State is saved automatically at key points (defined in `src/orchestration/controller.py:454-460`):
+
+<Steps>
+  <Step title="After Data Profiling">
+    State saved when profiling completes:
+    ```python
+    self.save_state()  # Line 187
+    ```
+  </Step>
+
+  <Step title="After Baseline Model">
+    State saved after baseline experiment:
+    ```python
+    self.save_state()  # Line 239
+    ```
+  </Step>
+
+  <Step title="After Each Iteration">
+    State saved after every experiment iteration:
+    ```python
+    self.save_state()  # Line 328
+    ```
+  </Step>
+
+  <Step title="On Keyboard Interrupt">
+    State saved when you press Ctrl+C:
+    ```python
+    except KeyboardInterrupt:
+        controller.save_state()  # src/main.py:195
+    ```
+  </Step>
+
+  <Step title="At Completion">
+    Final state saved when loop completes:
+    ```python
+    self.save_state()  # Line 450
+    ```
+  </Step>
+</Steps>
+
+## State File Format
+
+State is saved as JSON in `outputs/state_{session_id}.json`:
+
+```json
+{
+  "session_id": "a1b2c3d4",
+  "config": {
+    "data_path": "data/sample/california_housing.csv",
+    "target_column": "MedHouseVal",
+    "task_type": "regression",
+    "constraints": "# Experiment Constraints\n...",
+    "max_iterations": 20,
+    "time_budget": 3600,
+    "plateau_threshold": 3,
+    "improvement_threshold": 0.005,
+    "primary_metric": "rmse",
+    "output_dir": "outputs"
+  },
+  "data_profile": {
+    "n_rows": 20640,
+    "n_columns": 9,
+    "columns": ["MedInc", "HouseAge", ...],
+    "numeric_stats": { ... },
+    "target_stats": { ... }
+  },
+  "experiments": [
+    {
+      "experiment_name": "baseline",
+      "iteration": 0,
+      "model_type": "LinearRegression",
+      "metrics": {"rmse": 0.7456, "r2": 0.6012},
+      "success": true,
+      "timestamp": "2026-03-02T10:00:05.123456"
+    },
+    {
+      "experiment_name": "log_transform_rf",
+      "iteration": 1,
+      "model_type": "RandomForestRegressor",
+      "metrics": {"rmse": 0.4201, "r2": 0.7834},
+      "hypothesis": "Log transformation will reduce target skewness",
+      "success": true,
+      "timestamp": "2026-03-02T10:00:18.456789"
+    }
+  ],
+  "current_iteration": 2,
+  "phase": "experiment_design",
+  "best_metric": 0.4201,
+  "best_experiment": "log_transform_rf",
+  "iterations_without_improvement": 0,
+  "start_time": 1709377200.5,
+  "end_time": null,
+  "gemini_conversation_history": [
+    {
+      "role": "user",
+      "content": "Design the next experiment...",
+      "timestamp": "2026-03-02T10:00:10.123456"
+    },
+    {
+      "role": "model",
+      "content": "{\"experiment_name\": \"log_transform_rf\", ...}",
+      "timestamp": "2026-03-02T10:00:12.789012"
+    }
+  ],
+  "agent_recommends_stop": false,
+  "termination_reason": null
+}
+```
+
+<Info>
+  State includes the **complete Gemini conversation history**, maintaining Thought Signature continuity when resuming.
+</Info>
+
+## Resuming a Session
+
+### Basic Resume
+
+<Steps>
+  <Step title="Locate State File">
+    Find the state file in the outputs directory:
+
+    ```bash
+    ls outputs/state_*.json
+    # outputs/state_a1b2c3d4.json
+    ```
+  </Step>
+
+  <Step title="Resume with --resume Flag">
+    Use the `--resume` flag with the state file path:
+
+    ```bash
+    python -m src.main run \
+      --data data/sample/california_housing.csv \
+      --target MedHouseVal \
+      --task regression \
+      --resume outputs/state_a1b2c3d4.json \
+      --verbose
+    ```
+
+    <Note>
+      You must still provide `--data`, `--target`, and `--task` arguments, but they are validated against the saved state.
+    </Note>
+  </Step>
+
+  <Step title="Verify Resume">
+    The autopilot prints confirmation:
+
+    ```
+    ✓ Resumed from outputs/state_a1b2c3d4.json
+    Session ID: a1b2c3d4
+    Current iteration: 2
+    Best metric (rmse): 0.4201
+    ```
+  </Step>
+</Steps>
+
+### What Gets Restored
+
+When resuming (implemented in `src/orchestration/controller.py:92-95`):
+
+<ResponseField name="Configuration" type="restored">
+  All original settings:
+  - Data path, target column, task type
+  - Constraints text
+  - Max iterations, time budget
+  - Primary metric
+</ResponseField>
+
+<ResponseField name="Data Profile" type="restored">
+  Complete dataset analysis (skips re-profiling)
+</ResponseField>
+
+<ResponseField name="Experiment History" type="restored">
+  All completed experiments:
+  - Model types, parameters, preprocessing
+  - Metrics, hypotheses, reasoning
+  - Success/failure status
+  - Timestamps
+</ResponseField>
+
+<ResponseField name="Best Tracking" type="restored">
+  Current best:
+  - Best metric value
+  - Best experiment name
+  - Iterations without improvement
+</ResponseField>
+
+<ResponseField name="Gemini Context" type="restored">
+  Full conversation history for Thought Signature continuity:
+  - All user prompts
+  - All model responses
+  - Timestamps
+
+  <Tip>
+    This is crucial! Gemini maintains reasoning continuity across the interruption.
+  </Tip>
+</ResponseField>
+
+<ResponseField name="Phase" type="restored">
+  Exact phase when interrupted:
+  - `data_profiling`, `baseline_modeling`, `experiment_design`, etc.
+  - Resumes from next logical step
+</ResponseField>
+
+### What Does NOT Get Restored
+
+<Warning>
+  The following are **not** saved and must be re-specified:
+
+  - `--verbose` flag (defaults to False)
+  - `--output-dir` (uses original from state)
+  - MLflow tracker state (auto-reconnects to same experiment)
+</Warning>
+
+## Resuming After Different Interruptions
+
+### Scenario 1: Keyboard Interrupt (Ctrl+C)
+
+```bash
+# Original run
+python -m src.main run \
+  --data data/sample/california_housing.csv \
+  --target MedHouseVal \
+  --task regression \
+  --max-iterations 20 \
+  --verbose
+
+# ... (3 iterations complete)
+# Press Ctrl+C
+
+^C
+Interrupted by user. Saving state...
+✓ State saved. You can resume with --resume
+```
+
+**Resume**:
+```bash
+python -m src.main run \
+  --data data/sample/california_housing.csv \
+  --target MedHouseVal \
+  --task regression \
+  --resume outputs/state_a1b2c3d4.json \
+  --verbose
+
+# Continues from iteration 4
+```
+
+### Scenario 2: System Crash or Kill
+
+If the process crashes or is killed:
+
+```bash
+# State is saved after each iteration
+# Resume from last completed iteration
+
+python -m src.main run \
+  --data data/sample/california_housing.csv \
+  --target MedHouseVal \
+  --task regression \
+  --resume outputs/state_a1b2c3d4.json
+```
+
+<Note>
+  If the crash occurred **during** an iteration (not between iterations), that iteration's results are lost and will be re-run.
+</Note>
+
+### Scenario 3: Time Budget Exhausted
+
+If the time budget runs out:
+
+```bash
+# Original run with 30-minute budget
+python -m src.main run \
+  --data data/sample/california_housing.csv \
+  --target MedHouseVal \
+  --task regression \
+  --time-budget 1800 \
+  --max-iterations 20
+
+# ... (time expires after 5 iterations)
+Time budget exhausted
+✓ Results saved to outputs
+```
+
+**Resume with extended budget**:
+```bash
+python -m src.main run \
+  --data data/sample/california_housing.csv \
+  --target MedHouseVal \
+  --task regression \
+  --resume outputs/state_a1b2c3d4.json \
+  --time-budget 3600  # Additional 1 hour
+```
+
+<Warning>
+  The `--time-budget` for resumed runs is **additional time**, not total time from the original start.
+</Warning>
+
+## Modifying Resume Behavior
+
+### Extend Iterations
+
+Increase max iterations when resuming:
+
+```bash
+# Original: 10 iterations
+python -m src.main run ... --max-iterations 10
+
+# Resume with 20 total iterations
+python -m src.main run ... --resume state.json --max-iterations 20
+```
+
+<Info>
+  The `--max-iterations` value when resuming sets a **new maximum**, not additional iterations.
+</Info>
+
+### Change Verbosity
+
+```bash
+# Original run without verbose
+python -m src.main run ... --max-iterations 10
+
+# Resume with verbose output
+python -m src.main run ... --resume state.json --verbose
+```
+
+### Cannot Change
+
+These settings are locked to the original values (enforced by state validation):
+
+- `--data` (must match original)
+- `--target` (must match original)
+- `--task` (must match original)
+- `--constraints` (loaded from state)
+- `--output-dir` (loaded from state)
+
+## State File Management
+
+### Finding State Files
+
+State files are named by session ID:
+
+```bash
+# List all state files
+ls -lh outputs/state_*.json
+
+# Find state files from today
+find outputs -name "state_*.json" -mtime -1
+
+# Find state by session ID (if you know it)
+ls outputs/state_a1b2c3d4.json
+```
+
+### Cleaning Up Old States
+
+State files persist indefinitely. Clean up manually:
+
+```bash
+# Remove states older than 30 days
+find outputs -name "state_*.json" -mtime +30 -delete
+
+# Archive old states
+mkdir -p archive
+mv outputs/state_*.json archive/
+```
+
+### Backing Up State
+
+For long-running experiments, back up state periodically:
+
+```bash
+# Copy state to backup location
+cp outputs/state_a1b2c3d4.json backups/state_a1b2c3d4_$(date +%Y%m%d_%H%M%S).json
+
+# Or sync entire outputs directory
+rsync -av outputs/ backups/outputs_backup/
+```
+
+## Troubleshooting Resume Issues
+
+<AccordionGroup>
+  <Accordion title="State file not found">
+    **Error**: `FileNotFoundError: outputs/state_a1b2c3d4.json`
+
+    **Causes**:
+    - State file moved or deleted
+    - Incorrect path provided to `--resume`
+    - State not saved (process killed before first save)
+
+    **Solution**:
+    ```bash
+    # Check if state exists
+    ls -lh outputs/state_*.json
+
+    # Use correct path
+    python -m src.main run ... --resume outputs/state_a1b2c3d4.json
+
+    # If lost, restart from scratch (no --resume)
+    ```
+  </Accordion>
+
+  <Accordion title="State validation fails">
+    **Error**: `AssertionError: Data path mismatch`
+
+    **Cause**: CLI arguments don't match saved state
+
+    **Solution**: Use exact same `--data`, `--target`, `--task` as original:
+    ```bash
+    # Check state file for original values
+    cat outputs/state_a1b2c3d4.json | grep -A5 '"config"'
+
+    # Match CLI arguments to state
+    python -m src.main run \
+      --data data/sample/california_housing.csv \  # From state
+      --target MedHouseVal \                        # From state
+      --task regression \                           # From state
+      --resume outputs/state_a1b2c3d4.json
+    ```
+  </Accordion>
+
+  <Accordion title="Gemini context lost">
+    **Observation**: Resumed session seems to "forget" previous reasoning
+
+    **Cause**: State file corrupted or conversation history truncated
+
+    **Solution**:
+    ```bash
+    # Validate state JSON
+    python -c "import json; print(json.load(open('outputs/state_a1b2c3d4.json')))" > /dev/null
+
+    # Check conversation history length
+    cat outputs/state_a1b2c3d4.json | jq '.gemini_conversation_history | length'
+
+    # If corrupted, restart from scratch
+    ```
+  </Accordion>
+
+  <Accordion title="MLflow tracking disconnected">
+    **Observation**: Resumed session creates new MLflow experiment
+
+    **Cause**: MLflow experiment name mismatch
+
+    **Solution**: MLflow auto-reconnects using `session_id`. If this fails:
+    ```bash
+    # Check MLflow experiments
+    mlflow ui --backend-store-uri file:./outputs/mlruns
+
+    # Look for experiment named: autopilot_{dataset}_{session_id}
+    # e.g., autopilot_california_housing_a1b2c3d4
+    ```
+
+    Resumed runs append to the **same** MLflow experiment.
+  </Accordion>
+
+  <Accordion title="Resume starts from iteration 0">
+    **Observation**: Resume seems to restart from beginning
+
+    **Cause**: State file from a completed (not interrupted) session
+
+    **Solution**: Check state phase:
+    ```bash
+    cat outputs/state_a1b2c3d4.json | jq '.phase'
+    # "completed" means session finished naturally
+
+    # Cannot resume completed sessions
+    # Start a new session instead
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Advanced: Manual State Editing
+
+<Warning>
+  Editing state files manually is risky and can corrupt the session. Only do this if you understand the state schema.
+</Warning>
+
+You can manually edit state JSON for advanced use cases:
+
+### Extend Max Iterations
+
+```bash
+# Edit state file
+vim outputs/state_a1b2c3d4.json
+
+# Change:
+"config": {
+  "max_iterations": 10,  # Change to 20
+  ...
+}
+
+# Save and resume
+python -m src.main run ... --resume outputs/state_a1b2c3d4.json
+```
+
+### Remove Failed Experiments
+
+If an experiment failed due to transient error:
+
+```bash
+# Edit state file
+vim outputs/state_a1b2c3d4.json
+
+# Remove the failed experiment from "experiments" array
+# Decrement "current_iteration"
+
+# Resume to retry that iteration
+```
+
+### Change Primary Metric
+
+```bash
+# Edit state file
+vim outputs/state_a1b2c3d4.json
+
+# Change:
+"config": {
+  "primary_metric": "rmse",  # Change to "r2"
+  ...
+}
+
+# This affects how "best" is determined going forward
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use Descriptive Session IDs">
+    Session IDs are auto-generated (8-char UUIDs). For easier management:
+
+    ```bash
+    # After run completes, rename state file
+    mv outputs/state_a1b2c3d4.json outputs/state_housing_exp1.json
+
+    # Resume with descriptive name
+    python -m src.main run ... --resume outputs/state_housing_exp1.json
+    ```
+  </Accordion>
+
+  <Accordion title="Checkpoint Long Runs">
+    For multi-hour experiments:
+
+    ```bash
+    # Run in screen/tmux for persistence
+    screen -S autopilot
+    python -m src.main run ... --max-iterations 50 --time-budget 14400
+
+    # Detach: Ctrl+A, D
+    # Reattach: screen -r autopilot
+    ```
+
+    State saves every iteration, so you can safely detach/reattach.
+  </Accordion>
+
+  <Accordion title="Version Control State Files">
+    For reproducibility:
+
+    ```bash
+    # After each resume
+    cp outputs/state_a1b2c3d4.json versioned_states/state_v2.json
+
+    # Track in git (if not too large)
+    git add versioned_states/state_v2.json
+    git commit -m "Experiment checkpoint after 10 iterations"
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Running Experiments" icon="rocket" href="/guides/running-experiments">
+    Learn about the full experiment loop
+  </Card>
+  <Card title="Troubleshooting" icon="wrench" href="/guides/troubleshooting">
+    Resolve common issues
+  </Card>
+</CardGroup>

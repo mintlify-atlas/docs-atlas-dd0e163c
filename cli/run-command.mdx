@@ -1,0 +1,232 @@
+---
+title: Run Command
+description: Complete reference for the autopilot run command
+---
+
+The `run` command is the primary entry point for starting an ML experiment session. It orchestrates the entire autonomous experimentation process from data profiling to final report generation.
+
+## Command Syntax
+
+```bash
+autopilot run [OPTIONS]
+```
+
+## Required Arguments
+
+Three arguments are required for every run:
+
+<ParamField path="--data" type="path" required>
+  Path to your dataset file. Supports CSV and Parquet formats.
+  
+  **Short form:** `-d`
+  
+  **Example:**
+  ```bash
+  autopilot run --data train.csv --target price --task regression
+  ```
+</ParamField>
+
+<ParamField path="--target" type="string" required>
+  Name of the target column for prediction. Must exist in your dataset.
+  
+  **Short form:** `-t`
+  
+  **Example:**
+  ```bash
+  autopilot run --data data.csv --target SalePrice --task regression
+  ```
+</ParamField>
+
+<ParamField path="--task" type="enum" required>
+  Type of machine learning task. Must be either `classification` or `regression`.
+  
+  **Options:**
+  - `classification` - For predicting categorical outcomes
+  - `regression` - For predicting continuous values
+  
+  **Example:**
+  ```bash
+  autopilot run --data customers.csv --target churned --task classification
+  ```
+</ParamField>
+
+## Optional Arguments
+
+<ParamField path="--constraints" type="path">
+  Path to a constraints file in Markdown format. Use this to guide the autopilot's experimentation strategy.
+  
+  **Short form:** `-c`
+  
+  **Default:** `None`
+  
+  **Example:**
+  ```bash
+  autopilot run -d data.csv -t price --task regression -c constraints.md
+  ```
+  
+  See [Constraints](/cli/constraints) for details on writing constraint files.
+</ParamField>
+
+<ParamField path="--max-iterations" type="integer">
+  Maximum number of experiment iterations to run. The autopilot will stop after this many iterations, even if the time budget hasn't been exhausted.
+  
+  **Short form:** `-n`
+  
+  **Default:** `20`
+  
+  **Range:** 1-100
+  
+  **Example:**
+  ```bash
+  autopilot run -d data.csv -t price --task regression --max-iterations 50
+  ```
+</ParamField>
+
+<ParamField path="--time-budget" type="integer">
+  Time budget in seconds for the entire experiment session. The autopilot will stop when this time limit is reached.
+  
+  **Default:** `3600` (1 hour)
+  
+  **Range:** 60-86400 (1 minute to 24 hours)
+  
+  **Example:**
+  ```bash
+  # Run for 2 hours
+  autopilot run -d data.csv -t price --task regression --time-budget 7200
+  ```
+</ParamField>
+
+<ParamField path="--output-dir" type="path">
+  Directory where results will be saved. If not specified, a timestamped directory will be created automatically in `./outputs/`.
+  
+  **Short form:** `-o`
+  
+  **Default:** Auto-generated (e.g., `./outputs/experiment_20240315_143022/`)
+  
+  **Example:**
+  ```bash
+  autopilot run -d data.csv -t price --task regression -o ./my_experiment
+  ```
+</ParamField>
+
+<ParamField path="--verbose" type="boolean">
+  Show detailed Gemini reasoning and thought processes during experimentation. Useful for understanding why the autopilot makes certain decisions.
+  
+  **Short form:** `-v`
+  
+  **Default:** `false`
+  
+  **Example:**
+  ```bash
+  autopilot run -d data.csv -t price --task regression --verbose
+  ```
+</ParamField>
+
+<ParamField path="--resume" type="path">
+  Resume from a previously saved state file. Use this to continue an interrupted experiment.
+  
+  **Default:** `None`
+  
+  **Example:**
+  ```bash
+  autopilot run --resume ./outputs/experiment_20240315_143022/state.json
+  ```
+  
+  <Note>
+  When resuming, the state file contains all configuration from the original run, so you don't need to specify `--data`, `--target`, etc. again.
+  </Note>
+</ParamField>
+
+## Workflow
+
+When you run the command, the autopilot executes the following workflow:
+
+1. **Configuration** - Validates arguments and loads API credentials
+2. **Data Profiling** - Analyzes dataset characteristics, distributions, and quality
+3. **Experiment Design** - Gemini creates an experiment plan based on data profile and constraints
+4. **Experiment Execution** - Runs experiments, tracks metrics, and logs results
+5. **Analysis & Iteration** - Analyzes results, generates hypotheses, and plans next experiments
+6. **Reporting** - Generates final report with best models and insights
+
+## Examples
+
+### Minimal Example
+
+Simplest possible command with just required arguments:
+
+```bash
+autopilot run --data train.csv --target SalePrice --task regression
+```
+
+### Production Example
+
+Full-featured command for a production run:
+
+```bash
+autopilot run \
+  --data housing_data.csv \
+  --target price \
+  --task regression \
+  --constraints production_constraints.md \
+  --max-iterations 50 \
+  --time-budget 14400 \
+  --output-dir ./production_run \
+  --verbose
+```
+
+### Classification Example
+
+Customer churn prediction:
+
+```bash
+autopilot run \
+  -d customer_data.parquet \
+  -t churned \
+  --task classification \
+  -c churn_constraints.md \
+  -n 30 \
+  -v
+```
+
+### Resume Example
+
+Continuing an interrupted experiment:
+
+```bash
+# Original run (interrupted with Ctrl+C)
+autopilot run -d data.csv -t price --task regression -n 100
+
+# Resume from saved state
+autopilot run --resume ./outputs/experiment_20240315_143022/state.json
+```
+
+## Exit Codes
+
+- `0` - Successful completion
+- `1` - Error or user interruption (Ctrl+C)
+
+## Output Structure
+
+The output directory contains:
+
+```
+outputs/experiment_20240315_143022/
+├── state.json              # Resumable state file
+├── experiments/            # Individual experiment results
+│   ├── exp_001.json
+│   ├── exp_002.json
+│   └── ...
+├── models/                 # Saved model artifacts
+│   ├── best_model.pkl
+│   └── ...
+├── plots/                  # Visualization outputs
+│   ├── feature_importance.png
+│   └── ...
+└── report.md              # Final experiment report
+```
+
+## See Also
+
+- [Arguments Reference](/cli/arguments) - Complete parameter documentation
+- [Constraints](/cli/constraints) - How to write constraint files
+- [Configuration](/installation) - Setting up API keys and preferences
